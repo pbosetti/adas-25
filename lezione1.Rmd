@@ -1,0 +1,118 @@
+---
+title: "Intro a R"
+author: "Paolo Bosetti"
+date: "2025-10-02"
+output:
+  html_notebook:
+    toc: true
+    number_sections: true
+  word_document:
+    toc: true
+    number_sections: true
+  html_document:
+    toc: true
+    number_sections: true
+---
+
+# Prima lezione: Markdown
+
+Un carattere # all'inizio di una riga, senza spazi prima e con almeno uno spazio dopo, indica un titolo di sezione.
+
+Questo è un testo di paragrafo. Un paragrafo deve iniziare sempre dal primo carattere (NO INDENTAZIONI!) e deve essere separato da linee vuote. 
+
+Una linea vuota equivale ad un a-capo, quindi paragrafi diversi devono essere separati da una (o più) linee vuote.
+
+## Formattazione in linea
+
+Due caratteri ## indicano un titolo di livello due, tre caratteri ### un titolo di livello tre, e così via.
+
+Questo è un **testo in grassetto** e questo *è in corsivo*. Il codice viene in genere visualizzato con carattere *monospaziato* (cioè in cui tutti i caratteri hanno la stessa larghezza), e si ottiene con gli apici inversi, così: `function()`.
+
+## Elenchi
+
+Un elenco puntato:
+
+* questo
+* è un esempio
+* di elenco puntato
+  - anche con sotto-elenchi
+  - come questo
+* e questo è l'ultimo punto.
+
+È obligatorio inserire una riga vuota prima e dopo l'elenco. Inoltre il primo livello deve iniziare all'inizio della riga (no spazi prima di `*`).
+
+Elenco numerato:
+
+1.  primo
+2.  secondo
+3.  terzo
+
+Valgono le stesse regole che per l'elenco numerato. Nota che i numeri non devono essere necessariamente in sequenza: le voci vengono rinumerate automaticamente in generazione del documento.
+
+
+# Inserimento di blocchi R
+
+I notebook consentono di generare documenti di qualità alternando testo descrittivo e codice utilizzato per l'analisi. Il codice viene inserito come *chunk*, mediante l'icona verde con la `c` in alto, oppure con la scorciatoia Ctrl-Alt-i (Windows e Linux) o Cmd-Opt-i (MacOS).
+
+In fase di generazione del documento, il *chunk* viene valutato e, se genera output testuale o grafico, questo viene inserito immediatamente sotto il codice.
+
+```{r echo=TRUE}
+df <- expand.grid(
+  N = 1:2,
+  A = c(1, 6, 10),
+  B = LETTERS[1:3]
+)
+df
+```
+
+## Differenza tra *Preview Notebook* e *Knit to HTML*
+
+Il comando *Preview Notebook* genera una preview del documento utilizzando le valutazioni dei vari blocchi effettuate mano a mano dall'utente mentre scrive il documento. Queste valutazioni modificano il contesto, o *ambiente*, dell'interprete R principale, quello della console. La generazione dell'output è quindi molto rapida (perché il codice è già stato valutato), ma è necessario prestare attenzione che tutti i *chunk* siano valutati correttamente e nell'ordine giusto. In particolare, se un determinato *chink* non è mai stato valutato nella corrente sessione di RStudio, nessun output verrà inserito nella preview. Ogni tanto, è bene cioè scegliere *Run All* dal menu del documento *Run*, per assicurarsi che tutti i blocchi siano eseguiti e nella sequenza corretta.
+
+Il comando *Knit to HTML* (e tutti gli altri comandi *Knit to ...*), invece, **esegue tutti i blocchi in un interprete separato**. Ciò assicura che il risultato finale sia attendibile e corretto, ma può richiedere molto tempo nel caso di documenti molto lunghi e con molti calcoli. L'ambiente in cui vengono create variabili e oggetti viene creato all'inizio dell'operazione e distrutto alla fine, e non è visibile all'utente.
+
+Per questo motivo, soprattutto su computer più lenti, è consigliato utilizzare la semplice *preview* durante la preparazione del documento, e limitarsi a generare il documento finale con *knit* solo nella fase finale.
+
+
+# Equazioni in $\LaTeX$
+
+In breve, le equazioni in $\LaTeX$ possono essere inserite sia in linea, come questa: $a=b+c$, che separatemente dal testo, in questo modo:
+
+$$
+a = b + c
+$$
+I quozienti si inseriscono come `\frac{numeratore}{denominatore}`:
+
+$$
+a = \frac{1}{b+c}
+$$
+
+Gli apici e i pedici si creano con `^` e `_`, rispettivamente. Se in apice o pedice c'è più di un carattere, questi vanno circondati da graffe:
+
+$$
+x_{ij} = \mu + \tau_i + \epsilon_{ij} 
+$$
+Come si vede, le lettere greche si ottengono anteponendo `\` al nome della lettera. Si noti che per la lettera epsilon esistono due varianti tipografiche: $\epsilon$ (`\epsilon`) e $\varepsilon$ (`\varepsilon`); per i indicare i residui si preferisce di solito la seconda.
+
+Le sommatorie e gli integrali si ottengono con `\sum` e `\int`, rispettivamente:
+
+$$
+\bar x = \frac{1}{N} \sum_{i=1}^N x_i
+$$
+e:
+
+$$
+f^-(x) = \int_{-\infty}^x f(\xi) d\xi;~~~f^+(x) = \int_x^{+\infty} f(\xi) d\xi
+$$
+Si noti che il carattere `~` indica uno spazio.
+
+Per ottenere più equazioni allineate in un blocco si usa l'ambiente `align` (si noti che in questo caso non servono i marcatori `$`):
+
+\begin{align}
+f^-(x) &= \int_{-\infty}^x f(\xi) d\xi \\
+f^+(x) &= \int_x^{+\infty} f(\xi) d\xi;
+\end{align}
+
+Dove ogni linea eccetto l'ultima deve terminare con un doppio *backslash* e il carattere `&` indica il punto di allineamento.
+
+Infine, i nomi delle funzioni più comuni (trigonometriche, esponenziali, ...) devono essere preceduti da una backslash, perché scrivere $\sin(x)$ non è come scrivere $sin(x)$ (quest'ultimo è il prodotto delle quattro variabili $s$, $i$, $n$ e $x$).
