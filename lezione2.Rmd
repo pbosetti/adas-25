@@ -24,6 +24,7 @@ output:
 # Eseguo lo script con le mie funzioni personalizzate:
 library(modelr)
 library(adas.utils)
+library(outliers)
 
 knitr::opts_chunk$set(
   fig.dim=c(5,3),      # dimensioni delle figure in pollici
@@ -379,8 +380,8 @@ income %>%
 L'uso in sequenza di `group_by` e `summarise` è così comune che le ultime versioni di `dplyr` consentono una semplificazione:
 
 ```{r}
-totals <- income %>% 
-  summarise(total = sum(count), .by=religion)
+(totals <- income %>% 
+  summarise(total = sum(count), .by=religion))
 ```
 
 Ora possiamo aggiungere una colonna con la percentuale:
@@ -393,11 +394,396 @@ income %>%
   )
 ```
 
-Oppure, in un colpo solo:
+Oppure, in un colpo solo e usando la mappa a due valori `map2_dbl()`:
 
 ```{r}
 income %>% 
   mutate(
-    perc = map2_dbl(religion, count, ~ (.y/totals[totals$religion == .x,]$total * 100) %>% round(2) )
+    perc = map2_dbl(religion, count, ~ (.y/totals[totals$religion == .x,]$total * 100) %>% round(2))
   )
 ```
+
+Si noti che le mappe a due valori si attendono una funzione che accetta due argimenti, cioè del tipo `\(x,y) x + y` oppure, in forma sintetica `~ .x + .y`.
+
+In realtà, l'operazione sopra eseguita consiste di unire due tabelle secondo una colonna comune, che agisce da cerniera. Questa operazione nel linguaggio dei database si chiama *left join*, e la libreria `dplyr` fornisce proprio una funzione equivalente:
+
+```{r}
+income %>% left_join(totals)
+```
+
+Cioè: importa nella tabella a sinistra tutte le voci corrispondenti nella tabella a destra, associandole mediante la colonna comune `religion`.
+
+Se le due tabelle hanno più di una colonna comune, oppure se il nome della colonna comune sono differenti, allora è necessario usare l'opzione `by` come segue:
+
+```{r}
+# Per dichiarare esplicitamente la colonna cerniera (obbligatorio nel caso di più colonne comuni)
+income %>% left_join(totals, by=join_by(religion))
+```
+
+oppure:
+
+```{r}
+# per dichiarare i nomi delle due colonne da usare come cerniera (si noti il doppio uguale!)
+income %>% 
+  rename(Religion = religion) %>% 
+  left_join(totals, by=join_by(Religion == religion))
+```
+
+Esiste anche il `join_right()`; in generale, comunque, consultare l'help di `join_left()` per comprendere i vari tipi di operazione *join*:
+
+```{r}
+# attenzione: scambio la posizione delle due tabelle
+totals %>% 
+  right_join(income)
+# il risultato è lo stesso ma l'ordine delle colonne è differente
+```
+
+Posso mettere tutto assieme ottenendo il risultato voluto in un'unico blocco di operazioni, sequenziali e chiare:
+
+```{r}
+income %>% 
+  # Aggiungo la colonna con i totali
+  left_join(
+    summarise(., total=sum(count), .by=religion),
+    by = join_by(religion)
+  ) %>% 
+  # Calcolo le percentuali
+  mutate(
+    perc = (count/total*100) %>% round(2) 
+  ) %>% 
+  # Seleziono solo ciò che mi serve
+  select(religion:count, perc)
+```
+
+## Grafici con GGplot2
+
+D'ora in avanti non utilizzeremo più le funzioni di plot base di R, ma ricorreremo piuttosto alla libreria `ggplot2` inclusa in `tidyverse`. È una libreria studiata per realizzare grafici di alta qualità evitando soluzioni che sono considerate fuorvianti o poco chiare.
+
+La libreria è basata sulla funzione `ggplot`, che accetta come primo argomento un data frame o una tibble.
+
+Il secondo argomento è chiamato *mapping* e rappresenta l'*estetica*, cioè definisce il ruolo delle varie colonne della tibble (ascissa, ordinata, colore, gruppo, ecc.). Il *mapping* si crea con la funzione `aes` (che sta per *aesthetics*):
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1, y=v2)) 
+```
+
+Come si nota, `ggplot` da sola non crea nessun grafico, ma le etichette degli assi sono giuste e l'estensione degli assi stessi è sufficiente a contenere tutti i dati nella tibble.
+
+Per aggiungere serie grafiche si usano comandi di *geometria*, che iniziano con il suffisso `geom_`:
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1, y=v2)) +
+  geom_line() +
+  geom_point(color="red", size=4)
+```
+
+Per aggiungere una seconda serie è necessario specificare una differente estetica in una differente geometria. La logica è:
+
+-   le estetiche comuni alle varie serie (ad esempio l'ascissa) si mettono in `ggplot`
+-   le estetiche proprie di ciascuna serie (le ordinate) si mettono nelle geometrie
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1)) +
+  geom_line(aes(y=v2), color="red") +
+  geom_line(aes(y=v3), color="green") + 
+  labs(x="Tempo (s)", y="Tensione (V)", title="Grafico di esempio")
+```
+
+Per ottenere una legenda, il modo più semplice è specificare il colore (o il tipo di linea) come estetica assegnando un nome descrittivo:
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1)) +
+  geom_line(aes(y=v2, color="v2")) +
+  geom_line(aes(y=v3, color="v3")) + 
+  labs(x="Tempo (s)", y="Tensione (V)", title="Grafico di esempio")
+```
+
+In realtà, se i dati sono in formato *tidy* le serie possono essere definite mediante l'estetica stessa, ottenendo automaticamente anche la legenda:
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  pivot_longer(-v1, names_to = "Canale", values_to = "Tensione (V)") %>% 
+  rename(`Tempo (s)` = v1) %>% 
+  ggplot(aes(x=`Tempo (s)`)) + 
+  geom_line(aes(y = `Tensione (V)`, color=Canale, linetype=Canale))
+```
+Da notare:
+
+-   estetiche come `color` (e `linewidth`, `linestyle`, `fill`, `shape`, ecc.) possono essere specificate
+    -   nella funzione `aes`, e fungono da aggregatori di serie
+    -   come argomenti di `geom_`, e si applicano a tutti gli oggetti di quella geometria
+-   la funzione `labs` consente di specificare le etichette per assi, grafico *e legenda*
+
+### Esempio evoluto
+
+Vogliamo ora realizzare qualche grafico per illustrare i dati di reddito nella tabella `income`. Anzitutto trasformiamo la colonna `income` da stringa in colonna numerica, che si servirà più avanti per poter riordinare i dati: Ci creiamo una tibble di supporto che definisce le corrispondenze numeriche per ogni intervallo di reddito:
+
+```{r}
+(values <- tibble(
+  income = relig_income %>% select(!religion) %>% names(),
+  v = c((1:5)*10, 75, 100, 150, 300, 0)
+))
+```
+
+Con un *left join* importiamo questi valori nella tabella originale:
+
+```{r}
+income2 <- income %>% 
+  left_join(values) %>% 
+  rename(income_n=v) %>% 
+  relocate(income_n, .after=income) %>% 
+  left_join(summarise(., total=sum(count), .by=religion)) %>% 
+  mutate(
+    income = factor(income, ordered=T, levels=values$income),
+    perc = (count/total*100) %>% round(2)
+  )
+
+income2
+```
+
+Si noti che la colonna `income` è stata ridefinita come `factor(income, ordered=T, levels=values$income)`: in questo modo gli intervalli di reddito vengono rappresentati come fattori (cioè variabili categoriche) ordinati (`ordered=T`) secondo la sequenza logica (come in `values$income`).
+
+Possiamo ora realizzare un grafico a barre sovrapposte, filtrando solo le righe per cui `income_n != 0`:
+
+```{r}
+income2 %>% 
+  filter(income_n != 0) %>%
+  ggplot(aes(x=religion, y=perc, fill=income)) +
+  geom_col() +
+  coord_flip() + # Scambia X e Y
+  scale_fill_viridis_d() # Scala colore ad alta visibilità
+```
+
+Il grafico, infine, può essere migliorato ordinando le religioni in funzione di quelle che hanno la categoria dei più ricchi più numerosa. Per ottenere questo risultato cambiamo la sequenza di ordinazione del fattore `religion`:
+
+```{r}
+religion_ord <- income2 %>% 
+  filter(income_n == 300) %>% # considero solo i più ricchi
+  arrange(desc(perc)) %>%     # in ordine decrescente
+  pull(religion) %>%          # estraggo solo la colonna religion
+  factor(ordered = T)         # trasformo in vettore ordinato
+
+religion_ord
+```
+
+Ora trasformo `income2` modificando l'ordine intrinseco del fattore `religion` e rifaccio il grafico:
+
+```{r}
+income2 %>% 
+  mutate(
+    religion = factor(religion, levels=religion_ord, ordered=T)
+  ) %>% 
+  filter(income_n != 0) %>% 
+  ggplot(aes(x=religion, y=perc, fill=income)) +
+  geom_col() +
+  geom_hline(yintercept=100, linetype=2) +
+  coord_flip() +
+  scale_fill_viridis_d() +
+  labs(
+    x="Religione",
+    y="Sul totale (%)",
+    fill="Reddito"
+  )
+```
+
+Esercizio: usando un *left join* tradurre i nomi delle religioni nel grafico.
+
+```{r}
+income_t <- income2 %>% 
+  left_join(
+    tibble(
+      religion = income2 %>% pull(religion) %>% as.factor() %>% levels(),
+      religione = c("Agnostico", "Ateo", "Buddista", "Cattolico", "Non sa/non risponde", "Evangelico", "Hindu",
+                    "Protestante nero", "Testimone di Jehovah", "Ebreo", "Protestante", "Mormone", "Musulmano", "Ortodosso",
+                    "Altro cristiano", "Altra fede", "Altra religione mondiale", "Non affiliato")
+    )
+  )
+
+religione_ord <- income_t %>% 
+  filter(income_n == 300) %>% # considero solo i più ricchi
+  arrange(desc(perc)) %>%     # in ordine decrescente
+  pull(religione) %>%          # estraggo solo la colonna religion
+  factor(ordered = T)         # trasformo in vettore ordinato
+
+religione_ord
+
+
+income_t %>% 
+  mutate(
+    religione = factor(religione, levels=religione_ord, ordered=T)
+  ) %>% 
+  filter(income_n != 0) %>% 
+  ggplot(aes(x=religione, y=perc, fill=income)) +
+  geom_col() +
+  geom_hline(yintercept=100, linetype=2) +
+  coord_flip() +
+  scale_fill_viridis_d() +
+  labs(
+    x="Religione",
+    y="Sul totale (%)",
+    fill="Reddito"
+  )
+```
+
+
+
+## Statistica inferenziale
+
+### Test di Student
+
+Caso più generale: test a due campioni, a due lati: creiamo due campioni `s1`e `s2` a partire dalla distribuzione normale. I due campioni avranno dimensioni differenti e saranno estratti da popolazioni con valori attesi e varianze *leggermente* differenti:
+
+```{r}
+set.seed(321)
+n1 <- 10
+n2 <- 14
+s1 <- rnorm(n1, 10.1, 0.2)
+s2 <- rnorm(n2, 10.2, 0.1)
+
+ggplot() +
+  geom_point(aes(x=1:n1, y=s1, color="s1")) +
+  geom_point(aes(x=1:n2, y=s2, color="s2"))
+```
+Si osserva che le medie dei due campioni non sono uguali e ci si chiede se la differenza osservata sia sufficientemente ampia da giustificare l'inferenza che $\mu_1\neq\mu_2$ (ipotesi alternativa):
+
+```{r}
+mean(s1)
+mean(s2)
+```
+
+Per prima cosa è necessario effettuare un test della varianza:
+
+```{r}
+(vt <- var.test(s1, s2))
+```
+
+Il $p$-value pari a `r vt$p.value %>% round(3)` corrisponde ad una probabilità di errore troppo alta per poter scartare l'ipotesi nulla: di conseguenza, concludiamo che **i due campioni provengono da popolazioni con la medesima varianza**, cioè sono campioni omoschedastici.
+
+A questo punto posso procedere col test di Student, specificando opportunamente l'opzione `var.equal` (con una soglia del 5% sulla probabilità d'errore di tipo I):
+
+```{r}
+(tt <- t.test(s1, s2, var.equal = (vt$p.value > 0.05), conf.level=0.99))
+```
+
+Concludiamo che, con una probabilità d'errore pari a `r tt$p.value %>% round(3)`, i due campioni **non possono provenire dalla stessa popolazione**, cioè che vale $H_1:~\mu1\neq\mu2$.
+
+Il T-test riporta le seguenti informazioni notevoli:
+
+-   la statistica di test $t_0=`r tt$statistic`$
+-   i gradi di libertà $n_1+n_2-2=`r sum(n)-2`$
+-   il *p*-value `r tt$p.value`
+-   i limiti dell'intervallo di confidenza
+
+La coppia di ipotesi effettivamente verificate è:
+
+\begin{align*}
+H_0 &: \mu_1-\mu_2 = \mu_0 \\
+H_1 &: \mu_1-\mu_2 \neq \mu_0
+\end{align*} dove $\mu_0$ è il parametro `mu=0` usato nella funzione `t.test()`.
+
+Come detto sopra, solo un *p*-value piccolo (solitamente almeno minore di 0.05) ci consente di rigettare $H_0$.
+
+L'intervallo di confidenza **è calcolato relativamente a** $\mu_0$: se nella funzione `t.test` il valore del parametro `mu` (con default a `0`) risulta interno all'intervallo, allora si accetta $H_0$ con il livello di confidenza assegnato (`conf.level`, default a 0.95), e viceversa. Ad esempio, si noti che se impongo a $\mu_0$ il valore di uno degli estremi dell'intervallo di confidenza, il *p-value* risulta pari proprio a 1 meno il livello di confidenza $1-0.95=0.05$:
+
+
+```{r}
+t.test(s1, s2, var.equal = vt$p.value > 0.05, mu = -0.00696)
+```
+### T-test a un lato
+
+Si noti che se per gli stessi campioni si valuta il corrispondente test a un lato, osservando che $\bar s_1 < \bar s_2$:
+
+```{r}
+t.test(s1, s2, 
+       var.equal=(vt$p.value>=0.05), 
+       mu=0,
+       alternative = "less",
+       conf.level=0.95)
+```
+
+si ottiene un $p$-value minore, cioè si può scartare l'ipotesi nulla con più forza: quando cioè si può già escludere uno dei due lati, il test a un lato è **più potente** (nel senso che ha una maggior potenza).
+
+## Box plot
+
+Dal punto di vista grafico, la differenza tra i due campioni `s1` e `s1` può essere visualizzata con un *box-plot*.
+
+Per crearlo, riorganizziamo i dati in modo da utilizzare una tibble. La funzione `geom_boxplot()` vuole un'estetica in cui in ordinata ci siano i valori e in ascissa una variabile categorica da utilizzare come chiave di raggruppamento:
+
+```{r}
+df <- tibble(
+  i = c(1:10, 1:14),
+  sample = c(rep("s1", 10), rep("s2", 14)),
+  values = c(s1, s2)
+)
+
+df %>% 
+  ggplot(aes(x=sample, y=values)) + 
+  geom_boxplot(varwidth=TRUE)
+```
+
+La tibble rende anche più semplice realizzare il grafico a dispersione:
+
+```{r}
+df %>% 
+  ggplot(aes(x=i, y=values, color=sample)) +
+  geom_point()
+```
+
+
+## Anomalie
+
+*Lo vediamo alla prossima lezione*
+
+### Test di Grubb:
+
+Nella realtà, piuttosto che applicare il test di Chauvenet si preferisce ricorrere al test di Grubb (fornito dalla funzione `grubbs.test()` del pacchetto `outliers`):
+
+```{r}
+grubbs.test(s1)
+```
+
+la quale conferma che il punto massimo di `s1` è un'anomalia. Dato che però il test di Grubb non fornisce *l'indice* dell'elemento anomalo, è necessario ricavarlo manualmente come indice dell'elemento col massimo scarto rispetto alla media del campione:
+
+```{r}
+which.max(abs(s1 - mean(s1)))
+```
+
+Per il secondo campione invece non risultano anomalie:
+
+```{r}
+grubbs.test(s2)
+```
+
+Possiamo quindi rimuovere il punto anomalo:
+
+```{r}
+df %>% 
+  filter(!(sample=="s1" & i==1)) %>%
+  ggplot(aes(x=sample, y=values)) + 
+  geom_boxplot(varwidth=T)
+```
+
