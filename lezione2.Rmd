@@ -1,6 +1,7 @@
 ---
 title: "Lezione 2"
 output:
+  pdf_document: default
   html_document:
     df_print: paged
 ---
@@ -694,7 +695,7 @@ Concludiamo che, con una probabilità d'errore pari a `r tt$p.value %>% round(3)
 Il T-test riporta le seguenti informazioni notevoli:
 
 -   la statistica di test $t_0=`r tt$statistic`$
--   i gradi di libertà $n_1+n_2-2=`r sum(n)-2`$
+-   i gradi di libertà $n_1+n_2-2=`r n1+n2-2`$
 -   il *p*-value `r tt$p.value`
 -   i limiti dell'intervallo di confidenza
 
