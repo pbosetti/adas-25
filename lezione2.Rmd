@@ -1199,7 +1199,22 @@ df %>%
 
 Quali delle differenze osservate sono statisticamente significative?
 
-Cominciamo con la coppia di ipotesi:
+Cominciamo con il formulare un **modello statistico** per i dati. Il **modello delle medie** è:
+
+$$
+y_{ij} = \mu_i + \varepsilon_{ij},~~~\varepsilon_{ij}\sim\mathcal N(0, \sigma^2)
+$$
+ed esprime ogni osservazione $y_{ij}$ come una componente deterministica $\mu_i$ propria di ciascun **gruppo di osservazioni** corrispondente ad un dato trattamento, più una componente stocastica $\varepsilon_{ij}$ (il **residio**).
+
+In alternativa, il **modello degli effetti** è completamente equivalente:
+
+$$
+y_{ij} = \mu_0 + \tau_i + \varepsilon_{ij},~~~\varepsilon_{ij}\sim\mathcal N(0, \sigma^2)
+$$
+
+in cui $\mu_0$ è la media complessiva di tutte le osservazioni e le $\tau_i$ sono le differenze delle medie di trattamento rispetto a $\mu_0$.
+
+Per il **modello delle medie** la coppia di ipotesi è:
 
 $$
 \begin{align}
@@ -1207,3 +1222,141 @@ H_0&: \mu_1 = \mu_2 = \dots = \mu_n \\
 H_1&: \mu_i \neq \mu_j~~~\textrm{per almeno una coppia } i\neq j
 \end{align}
 $$
+
+mentre per  il **modello degli effetti**:
+
+
+$$
+\begin{align}
+H_0&: \tau_1 = \tau_2 = \dots = \tau_n = 0 \\
+H_1&: \tau_i \neq 0~~~\textrm{per almeno una } i
+\end{align}
+$$
+
+Ancora: le due coppie di ipotesi sono assolutamente equivalenti.
+
+In R, il **modello statistico** è espresso come un modello lineare nei coefficienti mediante la funzione `lm()`. Quest'ultima accetta come parametro una *formula*, cioè una speciale sintassi di R che rappresenta delle relazioni tra ingressi ed uscite di un generico modello. per trasformare un modello statistico in formula R si procede come segue:
+
+* si considera il modello degli effetti
+* si rimuovono $\mu_0$ e i residui (e eventuali coefficienti)
+* nella relazione restante si sostituisce `=` con `~`
+
+Nel nostro caso, considerando che la $y_{ij}$ è rappresentata dalla colonna `Strength` e la colonna tratamento $\tau_i$ è rappresentata dalla colonna `Cotton`, risulta:
+
+```{r}
+df.lm <- lm(Strength ~ Cotton, data=df)
+```
+
+Questo oggetto *modello lineare* può essere passato alla funzione `anova()`:
+
+```{r}
+anova(df.lm)
+```
+
+Il risultato mostra u *p-value* molto piccolo, il che ci spinge a rifiutare l'ipotesi nulla e concludere che **almeno un trattamento $\tau_i$ ha un effetto statisticamente significativo**.
+
+**ESERCIZIO**: provare a rimuovere la conversione in fattore della colonna `Cotton` subito dopo il caricamento della tabella. Si osserva che la tabella ANOVA risultante è differente, e che la conclusione è opposta (*p-value* alto). Si osserva anche che in tal caso il numero di gradi di libertà nella seconda colonna per la riga `Cotton` è 1 invece di 4. Il motivo è che la colonna in questione contiene sì dati numerici, ma essi vanno intesi come **categorici**, cioè come indicatori di raggruppamento dei trattamenti, e ciò in R si ottiene con la trasformazione in fattori. Se così non è, le osservazioni non vengono raggruppate e i gradi di libertà sono calcolati in modo errato.
+
+
+Ogni test visto fin ora, inclusa ANOVA, è basata su una ipotesi di normalità dei residui, che sono disponibili nel modello lineare come `df.lm$residuals` oppure come `residuals(df.lm)`. Questa ipotesi va **verificata**, ad esempio con il test di Shapiro, la cui ipotesi nulla è quella di normalità:
+
+```{r}
+df.lm$residuals %>% shapiro.test()
+```
+
+Esiste anche una seconda funzione utilizzata per il calcolo dell'analisi della varianza, ed è `aov()`. tale funzione richiede una formula (e non un modello lineare), e deve essere a sua volta passata a `summary()` per ottenere la tabella ANOVA:
+
+```{r}
+aov(Strength ~ Cotton, data=df) %>% summary()
+```
+
+**ESERCIZIO**: verificare la normalità dei residui con un grafico Q-Q e con un istogramma.
+
+## Test di Tukey
+
+La funzione `aov()` è anche utile per il calcolo del **test di Tukey**
+
+```{r}
+df.tuk <- aov(Strength ~ Cotton, data=df) %>% TukeyHSD(conf.level=0.99)
+df.tuk
+```
+
+**ESERCIZIO**: provare a cambiare il livello di confidenza e studiarne l'effetto sul *p-value* e sull'intervallo di confidenza per ciascuna differenza.
+
+Il test di Tukey può essere messo in grafico con la funzione `adas.utils::ggTukey()`:
+
+```{r}
+df.tuk %>% ggTukey()
+```
+
+Se non serve la tabella numerica con gli intervalli di confidenza si può ottenere direttamente il grafico:
+
+```{r}
+df %>% ggTukey(Strength ~ Cotton)
+```
+
+
+## Anova a due vie
+
+Consideriamo un esperimento che misura la vita di una batteria al variare della temperatura di esercizio e del tipo di elettrolita utilizzato all'interno della batteria stessa:
+
+```{r}
+df <- examples_url("battery.dat") %>% 
+  read_table() %>% 
+  mutate(
+    Temperature = factor(Temperature),
+    Material = factor(LETTERS[Material])
+  )
+```
+
+Si noti che abbiamo propriamente convertito in fattore le due colonne `Temperature` e `Material`. Inoltre, dato che quest'ultimo è un **fattore qualitativo** lo trasformiamo in lettere, in modo da rimuovere esplicitamente ogni criterio di cardinalità.
+
+Osserviamo i dati in grafico, mettendo in ascissa l'unico fattore quantitativo e in serie quello qualitativo:
+
+```{r}
+df %>% 
+  group_by(Temperature, Material) %>% 
+  summarise(
+    Life = mean(Response),
+    Min = min(Response),
+    Max = max(Response)
+  ) %>% 
+  ggplot(aes(x=Temperature, y=Life, color=Material, group=Material)) + 
+  geom_line() + 
+  geom_point() +
+  geom_errorbar(aes(min=Min, max=Max), width=0.1, position="dodge")
+```
+
+Oppure, in box plot:
+
+```{r}
+df %>% 
+  ggplot(aes(x=Temperature, y=Response, color=Material)) + 
+  geom_boxplot()
+```
+
+Costruiamo il modello lineare **a due fattori** $y_{ijk} = \mu + \alpha_i + \beta_j + (\alpha\beta)_{ij} + \varepsilon_{ijk}$, in cui:
+
+* $\alpha_i$ è l'**effetto** del primo fattore
+* $\beta_j$ è l'**effetto** del secondo fattore
+* $(\alpha\beta)_{ij}$ è l'**interazione** tra i due fattori, cioè indica quanto l'effetto dell'uno dipende dal **livello** dell'altro
+
+Questo modello può essere trasformato in formula R come `Response ~ Temperature + Material + Temperature:Material`, dove i due punti indicano l'interazione. In breve, si può anche scrivere `Response ~ Temperature*Material`, dove l'asterisco si espande in somma più interazione:
+
+```{r}
+# df.lm <- lm(Response ~ Temperature + Material + Temperature:Material, data=df)
+df.lm <- lm(Response ~ Temperature * Material, data=df)
+anova(df.lm)
+```
+
+Si capisce che entrambi i fattori sono statisticamente significativi, e così pure la loro interazione, seppur in misura inferiore.
+
+Quindi, l'analisi della varianza ci conferma che non tutti i trattamenti sono equivalenti. Ma quali differenze sono statisticamente significative? possiamo valutarlo con un (anzi: tre) test di Tukey.
+
+In particolare vogliamo realizzare tre test di Tukey, per i tre tipi di materiale. La funzione `ggTukey()` consente di farlo passando due formule: una per il test vero e proprio, una seconda (parametro `splt`) come formula a un lato per indicare il fattore di raggruppamento:
+
+```{r}
+df %>% 
+  ggTukey(Response ~ Temperature, splt= ~ Material)
+```
+
