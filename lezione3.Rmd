@@ -1,0 +1,206 @@
+---
+title: "Lezione3"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(adas.utils)
+library(modelr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Regressione lineare
+
+## Modello lineare univariato
+
+Generiamo dei dati in modo che sia:
+
+$$
+y_i = b x_i + cx_i^2 + \varepsilon_i = y_{\text{nom},i} + \varepsilon_i,~~~\varepsilon_i\sim\mathcal N(0, \sigma^2)
+$$
+con $a = 0$, $b=2$, $c=0.1$ e $\sigma=2$.
+
+
+```{r}
+set.seed(0)
+N <- 100
+a <- 0
+b <- 2
+c <- 0.1
+
+df <- tibble(
+  x = seq(-10, 10, length.out = N),
+  y_nom = a + b * x + c * x^2,
+  y = y_nom + rnorm(N, 0, 2)
+)
+
+df %>% 
+  ggplot(aes(x = x)) +
+  geom_line(aes(y = y_nom), color="red", linetype=2) +
+  geom_point(aes(y = y))
+
+```
+
+Si noti che la nominale `y_nom` (cioè $y_{\text{nom},i}$) è normalmente ignota.
+
+Definiamo un modello lineare di secondo grado, dato che la relazione $y=f(x)$ mostra una curvatura. La *formula* R corrispondente a $y=a + bx + cx^2$ è `y ~ x + I(x^2)`. Si noti che `x^2` sarebbe normalmente espanso, secondo l'algebra delle formule, come `x*x`, cioè `x + x + x:x`, cioè in definitiva `x`. Per questo motivo l'espressione quadrata va **protetta** con la funzione identità `I()`, che dice a R: *"non espandere questa espressione ma trattala così com'è"*.
+
+```{r}
+(df.lm <- lm(y ~ x + I(x^2), data = df))
+```
+
+Si nota che il modello lineare che si ottiene contiene già i valori stimati per i tre coefficienti $a$, $b$ e $c$.
+
+Tutte le informazioni contenute in `df.lm` sono elencabili con `summary()`:
+
+```{r}
+attributes(df.lm)
+df.lm$coefficients
+```
+
+Per regredire polinomi di grado superiore è più rapido usare `poly()`, funzione che costruisce un polinomio del grado desiderato. **Ricordarsi di passare sempre l'opzione `raw=TRUE`**.
+
+```{r}
+lm(y ~ poly(x, 10, raw=TRUE), data=df)
+```
+
+Ulteriori informazioni sulla regressione si ottengono con `summary()`. In particolare, si nori il corfficielte di determinazione $R^2$ e i *p-value* associati a ciascun coefficiente del modello: coefficienti con *p-value* alto possono essere rimossi dal modello, perché il loro contributo non è statisticamente significativo:
+
+```{r}
+summary(df.lm)
+```
+
+In questo caso osserviamo che l'intercetta (cioè $a$) può essere rimossa. Per rimuovere l'intercetta in una formula basta sottrarre 1:
+
+```{r}
+(df.lm <- lm(y ~ x + I(x^2) - 1, data = df))
+```
+
+```{r}
+summary(df.lm)
+```
+
+È sempre importante verificare la normalità e l'assenza di pattern dei residui:
+
+```{r}
+df2 <- df %>% 
+  add_residuals(df.lm) %>% 
+  add_predictions(df.lm)
+
+df2 %>% 
+  ggplot(aes(x=x)) + 
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=pred), color="green") + 
+  geom_line(aes(y=y_nom), color="red")
+```
+
+```{r}
+shapiro.test(df2$resid)
+
+df2 %>% 
+  ggplot(aes(sample=resid)) + 
+  geom_qq() + 
+  geom_qq_line(color="red")
+
+df2 %>% 
+  ggplot(aes(x = x)) + 
+  geom_point(aes(y = resid))
+```
+
+Se si desidera solo visualizzare la regressione e la **banda di confidenza** su un grafico, si può ricorrere a `geom_smooth()`:
+
+
+```{r}
+df %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_smooth(
+    method="lm",
+    formula = y ~ x + I(x^2) - 1,
+    level = 0.95
+  ) +
+  geom_point()
+```
+
+## Estrapolazione
+
+Si è visto in teoria che il sovra-adattamento ha due effetti nocivi:
+
+* perdita di generalità
+* inaffidabile in estrapolazione
+
+Vediamo quindi cosa succede in estrapolazione, cioè quando si valuta un modello al di fuori dell'intervallo su cui il modello è stato addestrato/regredito.
+
+Anzitutto etichettiamo le osservazioni con una colonna `subset` che valga `"in"` tra $(-7.5, 7.5)$ e `"out"` al di fuori:
+
+```{r}
+df3 <- df %>% 
+  mutate(
+    subset = ifelse(x > -7.5 & x < 7.5, "in", "out")
+  )
+
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point()
+```
+
+Applichiamo la regressione con un modello di grado eccessivo, diciamo 5, ma **solo** sul subset `"in"`:
+
+```{r}
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point() +
+  geom_smooth(
+    data = filter(df3, subset=="in"),
+    method="lm", 
+    formula = y ~ poly(x, 5, raw=T)
+  ) 
+```
+
+Si noti come è possibile passare a una qualsiasi geometria un dataset diverso da quello base, ricevuto da `ggplot()` via pipe.
+
+Per estendere il modello al di fuori dell'intervallo di addestramento si aggiunge l'argomento `fullrange=TRUE` a `geom_smooth()`:
+
+```{r}
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point() +
+  geom_smooth(
+    data = filter(df3, subset=="in"),
+    fullrange = T,
+    method="lm", 
+    formula = y ~ poly(x, 5, raw=T)
+  ) 
+```
+
+Osserviamo come le bande di confidenza si allarghino molto più rapidamente che nel caso di un adattamento corretto (polinomio di grado 2).
+
+Proviamo ad esagerare con il grado del polinomio. In questo caso è evidente come in estrapolazione il modello regredito "esploda" molto rapidamente, e come all'interno dell'intervallo di addestramento il modello tende a inseguire i punti sperimentali, perdendo quindi di generalità:
+
+```{r}
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point() +
+  geom_smooth(
+    data = filter(df3, subset=="in"),
+    fullrange = T,
+    method="lm", 
+    formula = y ~ poly(x, 21, raw=T)
+  ) + 
+  coord_cartesian(ylim=c(-20,40))
+```
+
+Infine, vediamo come ottenere **esplicitamente** l'intervallo di confidenza per il modello lineare `df.lm`. Si usa la funzione `predict()`, che restituisce una tabella che può essere affiancata a `df` con `bind_cols()`:
+
+```{r}
+df %>% 
+  bind_cols(predict(df.lm, interval="confidence")) %>% 
+  ggplot(aes(x=x)) +
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=fit)) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr), alpha=0.5)
+```
+
