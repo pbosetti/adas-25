@@ -430,7 +430,7 @@ f <- function(t, t0=0, bias=0, a=1) {
 }
 ```
 
-Possiamo verificare il gradico di questa funzione creando una tabella di dati di appoggio:
+Possiamo verificare il grafico di questa funzione creando una tabella di dati di appoggio:
 
 ```{r}
 tibble(
@@ -501,3 +501,60 @@ data %>%
 ```
 
 **ESERCIZIO**: completare l'esempio con l'analisi dei residui.
+
+A questo punto, il diagramma di carico può essere: 
+
+* compensato per il termine `bias` (che rappresenta la *tara*, cioè il carico percepito dal sensore di forza quando non c'è contatto)
+* traslato a zero nel momento di contatto
+* depurato delle misure prima del contatto
+
+```{r}
+coef <- coefficients(data.nls)
+data %>% 
+  add_predictions(data.nls) %>% 
+  mutate(
+    y = y - coef["b"],
+    pred = pred - coef["b"],
+    t = t - coef["t0"]
+  ) %>% 
+  filter(t > 0) %>% 
+  ggplot(aes(x=t)) + 
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=pred), color="red") +
+  labs(x="tempo (s)", y="Carico (N)")
+```
+
+Si noti che per i modelli `nls` non è possibile ottenere direttamente gli intervalli di confidenza:
+
+```{r}
+predict(data.nls, interval="confidence")
+```
+
+Cioè, anche se richiediamo la banda di confidenza, la funzione `predict()` applicata a un modello `nls` restituisce **solo** la predizione. Ciò è dovuto al fatto che, se per i modelli lineari la banda di confidenza può essere calcolata analiticamente, per i modelli non-lineari non è possibile farlo.
+
+Tuttavia, è possibile *simulare* la banda di confidenza con metodi numerici/iterativi, ad esempio usando `predFit()` nella libreria `investr`:
+
+```{r}
+library(investr)
+data %>%
+  bind_cols(
+    predFit(
+      data.nls, 
+      newdata=., # ricorda: . rappresenta i dati ricevuti via pipe
+      level=0.99,
+      interval="confidence"
+    )
+  ) %>% 
+  mutate(
+    t = t - coef["t0"],
+    across(y:upr, \(f) f - coef["b"])
+  ) %>% 
+  filter(t > 0) %>% 
+  ggplot(aes(x=t)) + 
+  geom_point(aes(y=y)) + 
+  geom_ribbon(aes(ymin=lwr, ymax=upr), alpha=1/3) +
+  geom_line(aes(y=fit), color="red") +
+  labs(x="tempo (s)", y="Carico (N)", 
+       title="Conf.level: 0.99%")
+```
+
