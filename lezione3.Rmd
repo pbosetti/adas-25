@@ -417,6 +417,8 @@ dfn %>%
 
 # Regressione non lineare
 
+## Regressione ai minimi quadrati
+
 Se il modello da regredire non è lineare nei coefficienti (ad esempio perché è definito per parti), non è possibile effettuare una regressione con `lm`. In questi casi bisogna usare la **regressione non-lineare ai minimi quadrati** fornita in R dalla funzione `nls()` (*Nonlinear Least-Squares*).
 
 Come esempio consideriamo il caso di una misura di durezza mediante **indentazione strumentata**. Abbiamo un dispositivo che registra la forza applicata da un penetratore pressato sulla superficie piana di un materiale in funzione del tempo (o dello spostamento verticale). Il segnale della forza avrà inizialmente (prima del contatto) un valore nominale costante che chiamiamo `bias`, poi al tempo di contatto `t0` il carico comincia a aumentare seguendo una legge quadratica, con tangenza tra il tratto costante e quello parabolico. Possiamo definire una funzione R parametrica in questo modo:
