@@ -1,0 +1,112 @@
+---
+title: "Esercizio regressione"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(adas.utils)
+library(modelr)
+```
+
+# Regressione lineare
+
+Carichiamo i dati di esempio `micrometer.csv`. Il file contiene i dati di taratura di un micrometro a vite, riportando l'output del trasduttore elettronico `y` (mV) in funzione dello spostamento `x` (mm) letto sul nonio. I dati sono raccolti **in ordine casuale di `x`**.
+
+```{r}
+df <- examples_url("micrometer.csv") %>% 
+  read_csv(comment = "#", show_col_types = FALSE)
+
+df %>% 
+  head()
+```
+
+Osserviamo i dati in grafico a dispersione
+
+```{r}
+df %>% 
+  ggplot(aes(x=x, y=y)) +
+  geom_point() + 
+  labs(x="posizione (mm)", y="tensione (mV)")
+```
+
+I dati sembrano distribuirsi in due fasce parallele. Proviamo a realizzare un modello lineare di primo grado:
+
+```{r}
+# Modello lineare di primo grado
+df.lm <- lm(y ~ x, data = df)
+# Aggiungo residui e predizione ai dati
+df <- df %>% 
+  add_predictions(df.lm) %>% 
+  add_residuals(df.lm)  
+# Grafico della regressione
+df %>%  ggplot(aes(x = x)) +
+  geom_point(aes(y = y)) +
+  geom_line(aes(y = pred), color = "red")
+```
+
+Ora osserviamo i residui del modello:
+
+```{r}
+# Grafico dei residui
+df %>% ggplot(aes(x = x)) + 
+  geom_point(aes( y = resid), color = "blue")
+```
+
+Effettivamente i residui sono o positivi o negativi, mentre la fascia attorno a 0 è poco popolata. Se la distribuzione dei residui fosse normale, tale fascia sarebbe viceversa la più popolata.
+
+Osserviamo un istogramma dei residui:
+
+
+```{r}
+df %>% 
+  ggplot(aes(x = resid)) +
+  geom_histogram(bins = 30, color = "black" )
+```
+
+La distribuzione è **bimodale**. Ciò significa che il campione ha due *mode* cioè due valori più probabili (i due massimi nell'ostogramma). Nella pratica, ciò è spesso correlato alle situazioni in cui ci sono due eventi distinti che competono. In caso di sistemi meccanici, un esempio tipico sono i **giochi**. Nel caso in esame, ad esempio, se la vite micrometrica ha un gioco, esso sarà chiuso in una direzione quando la vite avanza, nella direzione opposta quando retrocede. In altre parole, ad ogni inversione del moto si perde una quantità pari all'ampiezza del gioco stesso.
+
+Posiamo quindi dedurre che, essendo i dati raccolti in direzione casuale e quindi con una continua inversione del moto spostandosi da una `x` alla successiva, i punti sopra la linea di regressione siano raccolti quando il gioco della vite è chiuso in un senso (per convenzione indicato con `"up"`), quelli sotto quando è chiuso nel senso opposto (`"down"`).
+
+Qggiungiamo alla tabella una colonna che marchi come `"up"` i punti con residui positivi, e viceversa:
+
+```{r}
+df <- df %>% 
+  mutate(
+    set = ifelse(resid>0, "up", "down")
+  )
+
+df %>% 
+  ggplot(aes(x=x)) +
+  geom_point(aes(y=y, color=set)) +
+  geom_line(aes(y=pred), color="blue")
+```
+
+Ora possiamo regredire **separatamente** i due gruppi. Per farlo separiamo la tabella in una lista di due tabelle mediante la funzione `split()`, effettuiamo la regressione una tabella alla volta mediante `map()`, e infine ricombiniamo le tabelle in una unica per realizare il grafico:
+
+```{r}
+df %>% 
+  # separo in accordon con la colonna `set`
+  split(~set) %>% 
+  # ad ogni elemento della lista applico la regressione e aggiungo la 
+  # predizione e l'intervallo di confidenza
+  map(\(d) {
+    m <- lm(y~x, data=d)
+    p <- predict(m, interval="confidence", level = 0.99)
+    d %>% bind_cols(p)
+  }) %>% 
+  # Unisco nuovamente le due tabelle
+  bind_rows() %>% 
+  # realizzo il grafico
+  ggplot(aes(x=x, group=set)) +
+  geom_point(aes(y=y, color=set)) +
+  geom_line(aes(y=fit, color=set)) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr), alpha=0.5)
+```
+
+Le due regressioni sono separate e gli intervalli di confidenza non si sovrappongono: ciò significa che l'operazione di separazione è stata corretta e che il sistema effettivamente presenta **isteresi meccanica** dovuta al giocho della vite.
+
+La distanza media tra le due rette (misurata in `x`) mi consente di stimare l'ampiezza del gioco meccanico (lasciamo il calcolo per esercizio).

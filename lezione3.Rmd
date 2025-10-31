@@ -13,6 +13,7 @@ output:
 library(tidyverse)
 library(adas.utils)
 library(modelr)
+library(ROCR)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -559,4 +560,181 @@ data %>%
   labs(x="tempo (s)", y="Carico (N)", 
        title="Conf.level: 0.99%")
 ```
+
+## Regressione lineare generalizzata
+
+Abbiamo i risultati di un esperimento che valuta il *drop test* di bottiglie di sapone liquido.
+
+La colonna `OK` indica i flaconi sopravvissuti al test. Siccome generalmente siamo interessati a test statistici che segnalano le **anomalie** (non la normalità), preferiamo utilizzare l'opposto, cioè una colonna `fail` che sia `TRUE` per i flaconi rotti.
+
+```{r}
+data <- examples_url("soap_bottles.dat") %>% 
+  read_table(comment="#") %>% 
+  mutate(
+    fail = !OK
+  ) %>% 
+  select(-OK)
+
+data %>% slice_head(n=10)
+```
+
+Il *drop test* verifica la resistenza alla caduta da 1 m di altezza di una bottiglia di sapone liquido in funzione del livello di riempimento (in % del valore nominale). Bottiglie più piene hanno un polmone d'aria (che è comprimibile) più ridotto, e quindi hanno una maggior probabilità di rottura per via della sovrapressione che si crea in seguito all'impatto col suolo. I dati dell'esperimento riportano il livello di riempimento effettivo e il risultato del test per `r length(data$run)`.
+
+L'esperimento è stato condotto impostando il dosatore dell'impianto di imbottigliamento a un livello di riempimento di 99.3% per 200 bottiglie e a 99.6% per altre 200 bottiglie, e misurando poi con un sistema di precisione l'effettivo riempimento prima del test di rottura.
+
+I risultati possiamo osservarli in un istogramma:
+
+```{r}
+data %>% 
+  ggplot(aes(x = p)) + 
+  geom_histogram(bins=20, fill=gray(1/2), color=gray(1/3)) +
+  geom_rug(aes(color=fail))
+```
+
+È evidente l'**andamento bimodale** dell'istogramma: ci sono cioè due massimi, dato che l'istogramma è la sovrapposizione di due distribuzioni (una a 99.3% di livello atteso, una al 99.6%). Il comando `geom_rug()` aggiunge una "stuoia" (*rug*) di linee in basso, una per ogni osservazione, colorate in funzione del risultato del *drop test*. Come si osserva, le due popolazioni sono parzialmente sovrapposte, ed è quindi il caso tipico in cui si può ottenere un classificatore con una regressione logistica.
+
+Prima di tutto dividiamo il dataset in due classi, una su cui fare la regressione e una su cui fare la validazione, in ragione di 80/20:
+
+```{r}
+set.seed(0)
+data <- data %>% 
+  mutate(
+    training = sample(c("train", "valid"), n(), prob=c(4, 1), replace=TRUE)
+  )
+```
+
+Ora possiamo costruire il modello lineare generalizzato (logistico) sul sottoinsieme di training (`family="binomial"` specifica di usare la funzione di collegamento logistica, corrispondente ad una distribuzione binomiale dei residui):
+
+```{r}
+data.glm <- glm(fail ~ p, data = filter(data, training == "train"), family="binomial")
+summary(data.glm)
+```
+
+Si noti che R assume come funzione logistica la seguente versione:
+
+$$
+\mathrm{logit}(x) = \frac{1}{1+\exp(-px-m))}
+$$
+che è del tutto equivalente alla:
+$$
+\mathrm{logit}(x) = \frac{1}{1+\exp(-p(x-x_0))}
+$$
+definendo $x_0=-m/p$.
+
+Possiamo quindi calcolare la **soglia di classificazione** sul livello di riempimento `p` come:
+
+```{r}
+# x0 = -p/m
+(x0 <- -data.glm$coefficients[1] / data.glm$coefficients[2])
+```
+
+Cioè le bottiglie con un livello di riempimento effettivo superiore a `r x0` tendono a rompersi nel *drop test*, e il numero di **falsi positivi** (bottiglie al di sopra di `x0` che sopravvivono) è uguale al numero di **falsi negativi** (bottiglie al di sotto di `x0` che si rompono).
+
+Aggiungiamo le predizioni ai dati originali:
+
+```{r}
+data <- data %>% 
+  add_predictions(data.glm, type="response")
+```
+
+Ora possiamo mettere in grafico e confrontare i risultati del test e le predizioni, sia sui dati di training che su quelli di validazione:
+
+```{r}
+data %>% 
+  mutate(
+    correct = (fail == (pred > 0.5))
+  ) %>% 
+  ggplot(aes(x=p)) + 
+  geom_line(aes(y=pred)) + 
+  geom_point(aes(y=as.numeric(fail), color = correct)) +
+  geom_vline(xintercept = x0, linetype=2) +
+  facet_wrap(~ training, nrow=2)
+```
+
+Si noti l'uso di `facet_wrap()`: separa su più grafici i dati da visualizzare, suddividendoli per i valori di fattori espressi dal secondo membro di una formula (in questo caso `~training`).
+
+Confrontiamo i conteggi per le varie condizioni (training e validazione, bottiglia rotta o meno, predizione corretta o errata):
+
+```{r}
+error_type <- function(outcome, pred) {
+  if (outcome == pred) return("correct")
+  if (outcome & !pred) return("false neg")
+  if (!outcome & pred) return("false pos")
+}
+
+data %>% 
+  mutate(
+    type = map2_chr(fail, pred > 0.5, error_type)
+  ) %>% 
+  group_by(training, fail, type) %>% 
+  summarise(count = n())
+```
+
+Alcune note:
+
+* ho creato una funzione per definire la tabella di verità (o matrice di confusione) per i possibili risultati del test, assumendo che **un positivo sia una bottiglia rotta** (dato che il negativo è sempre la condizione normale, attesa), e quindi un **falso positivo** sia una bottiglia intera che secondo il modello dovrebbe rompersi
+* la funzione `error_type()` non è vettorializzata (contiene dei condizionali), quindi per creare una colonna mediante tale funzione devo applicarla elemento per elemento, e uso la funzione `map2_chr()`, cioè una mappa a due valori che restituisce una stringa
+
+Osservando la tabella, in training ho 14 falsi negativi e 12 falsi positivi, come atteso. In validazione ho 3 falsi positivi e 2 falsi negativi: la differenza è minima e quindi **posso accettare il modello**.
+
+**ESERCIZIO** calcolare le percentuali
+
+Le matrici di confusione possono essere create anche con la funzione `table()`. Questa funzione vuole una tabella (oppure due vettori di uguale lunghezza) e restituisce una matrice che riposrta i conteggi delle varie combinazioni riscontrate, riga per riga (cioè quanti `TRUE TRUE`, `FALSE FALSE`, `TRUE FALSE` e `FALSE TRUE`):
+
+```{r}
+mc_t <- tibble(
+  Actual = filter(data, training=="train") %>% pull(fail),
+  Predicted = filter(data, training=="train") %>% pull(pred) > 0.5
+) %>% table()
+mc_t
+```
+
+Questo approccio ha il vantaggio che il risultato è una matrice e quindi può essere sottoposta a operazioni algebriche vettorializzate, ad esempio per trasformare il conteggio in percentuale:
+
+```{r}
+round(mc_t / sum(mc_t) * 100, 1)
+```
+
+Per i dati di validazione si ha:
+
+```{r}
+mc_v <- tibble(
+  Actual = filter(data, training=="valid") %>% pull(fail),
+  Predicted = filter(data, training=="valid") %>% pull(pred) > 0.5
+) %>% table()
+mc_v
+round(mc_v / sum(mc_v) * 100, 1)
+```
+
+In un colpo solo, ottenendo un **tensore** (cioè una matrice 2x2x2):
+
+```{r}
+data %>% 
+  mutate(Predicted = pred > 0.5) %>% 
+  select(Actual = fail, Predicted, Subset = training) %>% 
+  table()
+```
+
+Spesso è interessante modificare la soglia di allarme: scegliendola maggiore o minore di 0.5 è possibile modificare il rapporto tra falsi positivi e falsi negativi. Ciò è interessante quando le conseguenze associate ad un falso negativo sono, ad esempio, peggiori di quelle associate a un falso positivo (si pensi ad esempio ad un test di infettività).
+
+Nel nostro caso, ad esempio, guardando i grafici che riportano i punti e la curva logistica, osserviamo che aumentare la soglia significa avere più falsi positivi e meno falsi negativi. 
+
+C'è un metodo formale per identificare il valore di soglia più opportuno che studia la **performance** dei classificatori mediante le curve *receiver operating characteristic* (ROC).
+
+Usando il pacchetto `ROCR` otteniamo un grafico della quantità relativa di falsi positivi (`"fpr"`) contro quella di falsi negativi (`"fnr"`), in funzione di valori di soglia da 0 a 1 (indicato come colori e numeri sulla curva).
+
+```{r}
+pred <- prediction(
+  filter(data, training == "train") %>% pull(pred),
+  filter(data, training == "train") %>% pull(fail)
+)
+perf <- performance(pred, "fpr", "fnr")
+plot(perf, colorize=TRUE, print.cutoffs.at=seq(0, 1, 0.2))
+grid()
+```
+
+La curva ci dice che aumentare la soglia da 0.5 a 0.8 provoca un aumento del falsi negativi superiore alla riduzione di falsi positivi. Oppure, ridurre la soglia da 0.5 a 0.3 riduce sensibilmente i falsi negativi senza peggiorare troppo i falsi positivi. È insomma uno strumento di progettazione, che serve a mettere a punto le prestazioni del classificatore.
+
+Può anche essere utile a confrontare diversi classificatori: infatti tanto più il ginocchio della curva è marcato, tanto più il classificatore è efficiente. Una curva dritta tra `(0,1)` e `(1,0)`, ad esempio, indicherebbe due classi molto sovrapposte e quindi difficili da separare e con una frazione di falsi positivi e falsi negativi molto elevata, comparabile con quella delle predizioni corrette.
+
 
