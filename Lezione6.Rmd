@@ -1,0 +1,434 @@
+---
+title: "Lezione 6"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    toc: true
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(adas.utils)
+library(modelr)
+library(metR)
+library(car)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Vita di un utensile
+
+Mediante un piano fattoriale $3^2$ vogliamo studiare l'influenza della velocità di taglio e dell'angolo di spoglia sulla durata di un utensile da taglio per tornitura. Ripetiamo ogni trattamento due volte.
+
+Fattori:
+
+1. A: Angolo di spoglia (15, 20, 25)
+2. B: Velocità di taglio (125, 150, 175)
+3. Resa: vita (durata) dell'utensile da taglio
+
+## Preparazione della griglia di test
+
+Cominciamo preparando la tabella con tutti i trattamenti, cioè tutte le possibili combinazioni di livelli dei due fattori. Aggiungiamo una colonna per l'ordine standard e una per l'ordine casuale di esecuzione delle prove. Aggiungiamo anche le colonne `A` e `B` per i due fattori in *unità codificate**.
+
+```{r}
+df <- expand.grid(
+  Angle = c(15, 20, 25),
+  Speed = c(125, 150, 175),
+  Repeat = c(1, 2),
+  Y = NA
+) %>% 
+  mutate(
+    StdOrder = 1:n(),
+    RunOrder = sample(n()),
+    A = scales::rescale(Angle, to=c(-1, 1)),
+    B = scales::rescale(Speed, to=c(-1, 1)),
+    .before = Angle
+  )
+```
+
+Riordiniamo la tabella secondo la colonna `RunOrder` e la esportiamo in formato `.csv`:
+
+```{r}
+df %>% 
+  arrange(RunOrder) %>% 
+  write.csv("factorial_plan.csv")
+```
+
+Più semplicemente, usando `adas.utils`:
+
+```{r}
+df <- fp_design_matrix(2, rep=2, levels=c(-1, 0, 1)) %>% 
+  fp_add_names(
+    A = "Angle", 
+    B = "Speed"
+  ) %>% 
+  fp_add_scale(
+    A = c(15, 25),
+    B = c(125, 175)
+  )
+```
+
+## Conduzione esperimenti
+
+Per esportare e re-importare i dati in formato CSV:
+
+```{r}
+#| eval: false
+fp_write_csv(df, "factorial_plan.csv")
+df <- fp_read_csv(df, "factorial_plan.csv")
+```
+
+La tabella esportata viene utilizzata per la conduzione degli esperimenti. Per ogni trattamento, **condotti in ordine casuale secondo colonna `RunOrder`**, si riempie la colonna `Response` con i risultati ottenuti.
+
+## Lettura dati
+
+Nel nostro caso, ci limitiamo a leggere la risposta dalla tabella disponibile online come `cutting.dat`.
+
+Questa tabella riporta i risultati nella colonna `Response` (anziché `Y`) secondo lo stesso ordine standard (ma con il nome `StandardOrder` anziché `StdOrder`). Usiamo queste due colonne come chiave per un `left_join`:
+
+```{r}
+df <- df %>% 
+  left_join(
+    read.table(examples_url("cutting.dat"), header=TRUE) %>% 
+      select(StdOrder = "StandardOrder", Response)
+  ) %>% 
+  select(-Y)
+```
+
+## Analisi della varianza
+
+Costruiamo un modello lineare completo fino al secondo grado (dato che abbiamo tre livelli) e analizziamo la varianza:
+
+```{r}
+df.lm <- lm(Response ~ A * B * I(A^2) * I(B^2), data=df)
+anova(df.lm)
+```
+
+Riformulo in modello rimuovendo i termini non significativi: dato che i termini `I(B^2)` (che corrisponde a coefficiente $\beta_2$) e `B:I(A^2)` (che corrisponde a $(\alpha\beta)_{2,1}$) sono non-significativi, possiamo riformulare il modello lineare:
+
+```{r}
+df.lm <- lm(Response ~ A * B + I(A^2) + A:I(B^2) + I(A^2):I(B^2), data=df)
+anova(df.lm)
+```
+
+Anche per questo modello è necessario verificare l'adeguatezza, studiando i residui:
+
+```{r}
+df <- df %>% add_residuals(df.lm)
+
+df %>% ggplot(aes(x=A, y=resid)) + geom_point()
+df %>% ggplot(aes(x=B, y=resid)) + geom_point()
+df %>% ggplot(aes(x=RunOrder, y=resid)) + geom_point()
+
+df %>% 
+  ggplot(aes(sample=resid)) + 
+  geom_qq() + geom_qq_line(color="red")
+
+shapiro.test(df$resid)
+```
+
+La normalità e l'assenza di pattern mi consentono di accettare il modello.
+
+## Superficie di risposta
+
+Infine possiamo costruire la superficie di risposta per il modello `df.lm`.
+
+Abbiamo bisogno di una griglia regolare di punti nel dominio di A e B. Su questa griglia possiamo valutare il modello usando la funzione `modelr::add_predictions()`:
+
+```{r}
+N <- 50
+rs <- expand.grid(
+  A = seq(-1, 1, length.out=N),
+  B = seq(-1, 1, length.out=N)
+) %>% 
+  add_predictions(df.lm)
+```
+
+Il nuovo data frame `rs` può essere visualizzato con un grafico a contorno:
+
+```{r}
+rs %>% 
+  ggplot(aes(x=A, y=B, z=pred)) + 
+  geom_contour_filled(bins=20)
+```
+
+Il grafico è probabilmente più chiaro usando il pacchetto `metR`, che mette a disposizione due funzioni alternative per creare un grafico a contorno con le etichette sovrapposte alle curve di livello:
+
+```{r}
+rs %>% 
+  ggplot(aes(x=A, y=B, z=pred)) + 
+  metR::geom_contour_fill(bins=20) + 
+  metR::geom_contour2(aes(label = round(after_stat(level), 2)), bins = 20) + 
+  scale_fill_viridis_c() + 
+  labs(
+    x = attr(df, "factor.names")$A,
+    y = attr(df, "factor.names")$B,
+    fill="Tool life"
+  )
+```
+
+**Nota**: l'estetica `aes(label=round(after_stat(level), 2))` serve a specificare le etichette delle curve di livello. I valori di queste etichette sono impostati da una statistica calcolata all'interno della medesima funzione `metR::geom_contour2` (vedi l'help, nella sezione *computed variables*). In tutte le geometrie ggplot, le statistiche interne possono essere utilizzate con la funzione `after_stat()`. Vedere l'help `?ggplot2::aes_eval` per i dettagli.
+
+
+# Piano fattoriale $2^2$
+
+Vogliamo studiare la reazione chimica che avviene in un reattore, considerando due fattori:
+
+* A: concentrazione di reagente
+* B: quantità di catalizzatore
+* Resa (Y, *yied*): quantità di prodotto
+
+```{r}
+df <- fp_design_matrix(2, rep=3) %>% 
+  fp_add_names(
+    A="Conc",
+    B="Calalyst"
+  )
+
+# Per semplicità, questa volta assegnamo direttamente le misure:
+df$Y <- c(
+  28, 36, 18, 31,
+  25, 32, 19, 30, 
+  27, 32, 23, 29
+)
+
+# Somma di controllo:
+sum(df$Y)
+```
+
+Realizziamo un modello **completo**:
+
+```{r}
+df.lm <- lm(Y ~ A*B, data=df)
+anova(df.lm)
+```
+
+L'analisi della varianza mostra che l'interazione `A:B` non è significativa, quindi la rimuoviamo dal modello:
+
+```{r}
+df.lm <- lm(Y ~ A + B, data=df)
+anova(df.lm)
+```
+
+Analisi dei residui:
+
+```{r}
+# Aggiungiamo residui e predizioni
+df <- df %>% 
+  add_residuals(df.lm) %>% 
+  add_predictions(df.lm)
+
+# Verifichiamo eventuali pattern
+df %>% ggplot(aes(x=A, y=resid)) + geom_point()
+df %>% ggplot(aes(x=B, y=resid)) + geom_point()
+df %>% ggplot(aes(x=RunOrder, y=resid)) + geom_point()
+df %>% ggplot(aes(x=pred, y=resid)) + geom_point()
+
+# Normalità dei residui
+df %>% 
+  ggplot(aes(sample=resid)) + 
+  geom_qq() + geom_qq_line(color="red")
+
+shapiro.test(df$resid)
+```
+
+I residui risultano normali e senza pattern evidentio, con l'eccezione del grafici dei residui in funzione del **valore predetto**, in cui si può effettivamente osservare un pattern (largo-stretto-largo, a U rovesciata), quindi applichiamo il metodo di Box-Cox per identificare la miglior trasformazione sulla resa:
+
+```{r}
+car::boxCox(df.lm, lambda=seq(-2, 6, 0.1))
+```
+
+Seppure la curva sia abbastanza larga, sembra che la trasformazione $y^*=y^2$ sia preferibile, sebbene anche l'identità sia compresa nell'intervallo al 95%.
+
+Proviamo con la trasformazione $y\rightarrow y^2$:
+
+```{r}
+df.lm2 <- lm(Y^2 ~ A + B, data=df)
+anova(df.lm2)
+```
+
+Verifichiamo i pattern e la normalità:
+
+```{r}
+df <- df %>% 
+  select(-pred, -resid) %>% 
+  add_residuals(df.lm2) %>% 
+  add_predictions(df.lm2)
+
+df %>% ggplot(aes(x=A, y=resid)) + geom_point()
+df %>% ggplot(aes(x=B, y=resid)) + geom_point()
+df %>% ggplot(aes(x=RunOrder, y=resid)) + geom_point()
+df %>% ggplot(aes(x=pred, y=resid)) + geom_point()
+
+df %>% 
+  ggplot(aes(sample=resid)) + 
+  geom_qq() + geom_qq_line(color="red")
+
+shapiro.test(df$resid)
+```
+
+
+Effettivamente il pattern si riduce; non drammaticamente, ma del resto, come detto, la curva Box-Cox è molto ampia e non c'è molta differenza tra il risultato della trasformazione con $\lambda=2$ e l'identità.
+
+> **ESERCIZIO** costruire la curva di risposta
+
+> Verifichiamo anche questa superficie di risposta, ricordando che la resa del modello **deve essere anti-trasformata** ($y = \sqrt{ax_1 + bx_2 + c}$:
+
+```{r}
+expand.grid(
+  A = seq(-1, 1, 0.1), 
+  B = seq(-1, 1, 0.1)
+) %>% 
+  add_predictions(df.lm2) %>% 
+  ggplot(aes(x=A, y=B, z=sqrt(pred))) +
+  metR::geom_contour_fill() +
+  metR::geom_contour2(aes(label = round(after_stat(level), 2))) +
+  scale_x_continuous(
+    sec.axis = sec_axis(
+      ~ scales::rescale(., from=c(-1, 1), to=c(15, 25)),
+      name="reagente (%)"
+    )
+  ) +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      \(x) scales::rescale(x, from=c(-1, 1), to=c(1, 5)),
+      name="catalizzatore (g)"
+    )
+  ) +
+  scale_fill_viridis_c()
+```
+
+> Notare che abbiamo anche aggiunto le scale secondarie in unità reali.
+
+Ora confrontiamo i due modelli mediante grafici di interazione:
+
+```{r}
+df %>% 
+  add_predictions(df.lm, var="mod.1") %>% 
+  add_predictions(df.lm2, var="mod.2") %>% 
+  mutate(
+    B = factor(B),
+    mod.2 = sqrt(mod.2)
+  ) %>% 
+  pivot_longer(mod.1:mod.2, values_to = "pred", names_to = "model") %>% 
+  ggplot(aes(x=A, y=pred, color=B, linetype=model)) +
+  geom_line() +
+  labs(y="predizione", linetype="modello", title="Grafico di interazione")
+```
+
+# Wafer etching
+
+Esperimento di studio del processo di erosione di fette di Silicio.
+
+Fattori:
+
+* A: distanza wafer-elettrodo
+* B: flusso di gas inerte
+* C: potenza del segnale RF
+* Y: velocità di erosione
+
+Costruiamo la griglia di dati:
+
+```{r}
+df <- fp_design_matrix(3, rep=2) %>% 
+  fp_add_names(
+    A="Distance",
+    B="Flow",
+    C="Power"
+  )
+
+df$Y <- c(
+  550, 669, 633, 642,
+  1037, 749, 1075, 729,
+  604, 650, 601, 635,
+  1052, 868, 1063, 860
+)
+
+sum(df$Y)
+```
+
+Analisi del modello completo:
+
+```{r}
+df.lm <- lm(Y~A*B*C, data=df)
+anova(df.lm)
+```
+
+Revisione del modello considerando solo i fattori significativi:
+
+```{r}
+df.lm <- lm(Y ~ A*C, data=df)
+anova(df.lm)
+```
+
+Verifichiamo se serve una trasformazione:
+
+```{r}
+car::boxCox(df.lm, lambda=seq(-2, 4, 0.1))
+```
+Dato che non serve nessuna trasformazione, possiamo procedere con la verifica di adeguatezza del modello.
+
+```{r}
+df <- df %>% 
+  add_residuals(df.lm) %>% 
+  add_predictions(df.lm)
+
+df %>% ggplot(aes(x=A, y=resid)) + geom_point()
+df %>% ggplot(aes(x=C, y=resid)) + geom_point()
+df %>% ggplot(aes(x=RunOrder, y=resid)) + geom_point()
+df %>% ggplot(aes(x=pred, y=resid)) + geom_point()
+
+df %>% 
+  ggplot(aes(sample=resid)) + 
+  geom_qq() + geom_qq_line(color="red")
+
+shapiro.test(df$resid)
+```
+
+> **NOTA**: Si osserva un pattern per l'ordine di esecuzione delle prove e per i valori predetti. È quindi possibile che la variazione di condizioni ambientali durante l'esecuzione delle prove abbia influito sui risultati. Come già visto, Box-Cox non suggerisce una revisione del modello, quindi l'unica soluzione sarebbe indagare sulle condizioni embientali e, eventualmente, ripetere la campagna in condizioni più stabili.
+
+Infine possiamo realizzare la superficie di risposta:
+
+```{r}
+expand.grid(
+  A = seq(-1, 1, 0.1),
+  C = seq(-1, 1, 0.1)
+) %>% 
+  add_predictions(df.lm) %>% 
+  ggplot(aes(x=A, y=C, z=pred)) + 
+  metR::geom_contour_fill() + 
+  metR::geom_contour2(aes(label = round(after_stat(level), 2))) +
+  scale_x_continuous(
+    sec.axis = sec_axis(
+      ~ scales::rescale(., from=c(-1, 1), to=c(0.8, 1.2)),
+      name="distanza (mm)"
+    )
+  ) +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      \(x) scales::rescale(x, from=c(-1, 1), to=c(275, 325)),
+      name="potenza RF (W)"
+    )
+  )  +
+  scale_fill_viridis_c()
+```
+
+> **Esercizio**: realizzare i grafici di interazione.
+
+```{r}
+df %>% 
+  mutate(Cf=factor(C)) %>% 
+  add_predictions(df.lm) %>% 
+  ggplot(aes(x=A, y=pred, linetype=Cf)) +
+  geom_line() +
+  geom_point() +
+  geom_point(aes(y=Y, color=Cf)) +
+  labs(
+    x="Temperatura",
+    y="vel. filtrazione (l/min)", 
+    color="Conc.", linetype="Conc.")
+```
+
+> Il grafico di interazione è una visualizzazione alternativa della superficie di risposta, che riporta le due sezioni di essa corrispondenti al bordo inferiore e superiore del grafico a contorno della superficie di risposta stessa.
