@@ -432,3 +432,239 @@ df %>%
 ```
 
 > Il grafico di interazione è una visualizzazione alternativa della superficie di risposta, che riporta le due sezioni di essa corrispondenti al bordo inferiore e superiore del grafico a contorno della superficie di risposta stessa.
+
+
+# Misure ripetute, ma trattamenti non ripetuti
+
+* A: temperatura
+* B: tempo
+* C: pressione
+* D: flusso del gas
+* Resa t: spessore medio dello strato di ossido
+* Resa v: varianza (o la deviazione standard) dello spessore di ossido
+
+```{r}
+dm <- fp_design_matrix(4, rep=1) %>% 
+  fp_add_names(
+    A = "Temp", B = "Time",
+    C = "Pressure", D = "Flow"
+  )
+
+dm
+```
+
+```{r}
+y <- examples_url("duplicate.csv") %>% read.csv() %>% 
+  mutate(StdOrder = 1:n(), .before = t1)
+y
+```
+
+```{r}
+dm <- dm %>% 
+  select(-Y) %>% 
+  left_join(y, by=join_by(StdOrder)) %>% 
+  rowwise() %>% 
+  mutate(
+    t = mean(c(t1, t2, t3, t4)),
+    v = var(c(t1, t2, t3, t4))
+  ) %>% 
+  select(-(t1:t4)) %>% 
+  ungroup()
+
+head(dm)
+```
+
+```{r}
+dm.lm <- lm(t~A*B*C*D, data=dm)
+anova(dm.lm)
+```
+
+```{r}
+tibble(
+  term = dm.lm$effects %>% names(),
+  value = dm.lm$effects
+) %>% 
+  tail(-1) %>% 
+  ggplot(aes(sample=value)) + 
+  geom_qq_line(color="red") + 
+  geom_qq() +
+  geom_hline(aes(yintercept=value), linetype=2) +
+  geom_label(aes(x=-2.5, y=value, label=term))
+```
+
+```{r}
+daniel_plot_hn(dm.lm, nlab=6)
+```
+
+```{r}
+dm.lm <- lm(t ~ A*B + A*C + B:D, data=dm)
+anova(dm.lm)
+```
+
+```{r}
+dm.lm <- lm(t ~ A*B + A*C, data=dm)
+anova(dm.lm)
+```
+
+**ESERCIZIO**: effettuare l'analisi di adeguatezza del modello
+
+
+```{r}
+rs <- expand.grid(
+  A = seq(-1, 1, 0.1),
+  B = seq(-1, 1, 0.1),
+  C = seq(-1, 1, length.out=6)
+) %>% 
+  add_predictions(dm.lm, var="t")
+
+rs %>% 
+  ggplot(aes(x=A, y=B, z=t)) + 
+  geom_contour() +
+  geom_contour(breaks=c(-10, 10) + 400, color="red") +
+  metR::geom_label_contour() +
+  facet_wrap(~ factor(C))
+```
+
+```{r}
+daniel_plot_hn(lm(v ~ A*B*C*D, data=dm), nlab=7)
+```
+
+```{r}
+library(patchwork)
+daniel_plot_hn(lm(1/v ~ A*B*C*D, data=dm), nlab=7) +
+daniel_plot_hn(lm(log(v) ~ A*B*C*D, data=dm), nlab=7)
+```
+
+```{r}
+dm.lmv <- lm(1/v ~ A*B, data=dm) 
+dm.lmv %>% anova()
+```
+
+```{r}
+rs %>% 
+  add_predictions(dm.lmv, var="v") %>% 
+  ggplot(aes(x=A, y=B, z=t)) + 
+  geom_contour_filled(aes(z = sqrt(1/v)), breaks=seq(0, 2, 0.1)) +
+  geom_contour() +
+  geom_contour(breaks=c(-10, 10) + 400, color="red") +
+  geom_contour(aes(z=sqrt(1/v)), breaks=1.4, color="orange") +
+  metR::geom_label_contour() +
+  facet_wrap(~ factor(C))
+```
+
+
+# Impianto di filtrazione
+
+* A: temperatura
+* B: differenza di pressione
+* C: concentrazione di specie solida
+* D: velocità di agitazione
+* Resa: velocità di filtrazione
+
+```{r}
+dm <- fp_design_matrix(4, rep=1) %>% 
+  fp_add_names(
+    A="Temp", B="dPressure",
+    C="Conc", D="Stir"
+  ) %>% 
+  mutate(
+    Y = c(
+      45, 71, 48, 65,
+      68, 60, 80, 65,
+      43, 100, 45, 104,
+      75, 86, 70, 96
+    )
+  )
+
+sum(dm$Y)
+```
+
+```{r}
+daniel_plot_hn(lm(Y ~ A*B*C*D, data=dm), nlab=10)
+```
+
+```{r}
+dm.lm <- lm(Y ~ A*C + A*D, data=dm)
+anova(dm.lm)
+```
+
+```{r}
+dm <- dm %>% 
+  add_residuals(dm.lm) %>% 
+  add_predictions(dm.lm)
+
+dm %>% 
+  ggplot(aes(x=pred, y=resid)) + 
+  geom_point()
+```
+
+```{r}
+car::boxCox(dm.lm)
+```
+
+```{r}
+dm.lm <- lm(1/sqrt(Y) ~ A*C + A*D, data=dm)
+anova(dm.lm)
+```
+
+
+```{r}
+dm <- dm %>% 
+  add_residuals(dm.lm) %>% 
+  add_predictions(dm.lm)
+
+dm %>% 
+  ggplot(aes(x=pred, y=resid)) + 
+  geom_point()
+```
+
+## Diagramma di Pareto
+
+```{r}
+set.seed(1)
+tibble(
+  val = rnorm(10, mean = 0, sd=500),
+  cat = LETTERS[1:length(val)]
+) %>% 
+  pareto_chart(labels=cat, values=val)
+```
+
+```{r}
+pareto_chart(dm.lm) /
+pareto_chart(lm(Y~A*B*C*D, data=dm))
+```
+
+**ESERCIZIO**: realizzare i grafici di interazione per il modello finale.
+**ESERCIZIO**: realizzare superfici di risposta per il modello finale.
+
+
+# Filtrazione: CCD
+
+```{r}
+dm.c <- dm %>% 
+  select(-resid, -pred) %>% 
+  fp_augment_center(rep=5) %>% 
+  mutate(
+    Y = c(dm$Y, c(91, 90, 90, 89, 91))
+  )
+```
+
+```{r}
+dm.c.lm <- lm(1/sqrt(Y) ~ A*C + A*D + I(A^2), data=dm.c)
+anova(dm.c.lm)
+```
+
+```{r}
+dm.c %>% 
+  add_predictions(dm.c.lm) %>% 
+  mutate(
+    C = factor(C),
+    D = factor(D),
+    pred = 1/pred^2
+  ) %>% 
+  ggplot(aes(x=A, y=pred)) +
+  geom_line(aes(linetype = C)) +
+  geom_point(aes(y=Y, color=C)) +
+  facet_wrap(~D)
+```
+
