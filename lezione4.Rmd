@@ -1,0 +1,20 @@
+---
+title: "Lezione3"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    toc: true
+    number_sections: true
+header-includes: \usepackage[italian]{babel}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.align = "center",
+  fig.dim = c(8, 5), # rapporto L/H figure
+  out.width="10cm"   # dimensioni effettive figure
+)
+```
+
