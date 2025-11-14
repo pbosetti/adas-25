@@ -183,8 +183,12 @@ Vogliamo studiare la reazione chimica che avviene in un reattore, considerando d
 ```{r}
 df <- fp_design_matrix(2, rep=3) %>% 
   fp_add_names(
-    A="Conc",
-    B="Calalyst"
+    A="Concentration (%)",
+    B="Calalyst (mg)"
+  ) %>%
+  fp_add_scale(
+    A=c(15, 25),
+    B=c(1,5)
   )
 
 # Per semplicità, questa volta assegnamo direttamente le misure:
@@ -312,6 +316,7 @@ df %>%
     B = factor(B),
     mod.2 = sqrt(mod.2)
   ) %>% 
+  select(-pred) %>% 
   pivot_longer(mod.1:mod.2, values_to = "pred", names_to = "model") %>% 
   ggplot(aes(x=A, y=pred, color=B, linetype=model)) +
   geom_line() +
@@ -656,15 +661,26 @@ anova(dm.c.lm)
 
 ```{r}
 dm.c %>% 
-  add_predictions(dm.c.lm) %>% 
+  add_predictions(dm.lm, var="lm") %>%   # predizioni del modello di primo grado
+  add_predictions(dm.c.lm, var="qm") %>% # predizioni del modello quadratico
   mutate(
     C = factor(C),
     D = factor(D),
-    pred = 1/pred^2
+    qm = 1/qm^2, # anti-trasformo il modello
+    lm = 1/lm^2  # anti-trasformo il modello
   ) %>% 
-  ggplot(aes(x=A, y=pred)) +
-  geom_line(aes(linetype = C)) +
-  geom_point(aes(y=Y, color=C)) +
-  facet_wrap(~D)
+  ggplot(aes(x=A)) +
+  geom_line(aes(y=qm, linetype = C)) + # linee interazione per modello quadratico
+  geom_point(aes(y=lm)) +              # punti per modello primo grado
+  geom_point(aes(y=Y, color=C)) +      # punti colorati per dati grezzi
+  facet_wrap(
+    ~D, # un grafico per ogni livello di D
+    labeller = \(labels) map(labels, ~paste("D:", .))) + # cambia etichette di D
+  labs(y="Yield", color="D (data)", linetype="D (model)") # etichette legenda
 ```
 
+**Note**: 
+
+- quando si vuole usare una colonna numerica come parametro di raggruppamento (per colore, tipo di linea, tipo di punto...), la colonna va convertita in `factor`
+- `facet_wrap` usa come intestazione di ogni grafico (in grigio in alto) il valore della corrispondente colonna. Se si vuole modificare questo valore (es. da `1` a `D: 1`) si può usare l'opzione `labeller`. Questa vuole una funzione che accetta in ingresso una lista di etichette e deve restutuire una analoga lista di etichette modificate. Ad es., riceve `list("-1", "0", "1")` e deve restituire `list("D: -1", "D: 0", "D: 1")`. Ciò può essere ottenuto con una `map()`
+- `labs()` vuole i nomi di etichette di ogni estetica, ad es. `x`, `color` o `linetype`. Se due estetiche come `color` e `linetype` hanno etichette diverse, vengono create altrettante legende; se invece (default) hanno la stessa etichetta, si ottiene un'unica legenda composita (in questo caso meno leggibile).
