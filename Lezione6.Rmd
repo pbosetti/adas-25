@@ -325,7 +325,7 @@ df %>%
 
 # Wafer etching
 
-Esperimento di studio del processo di erosione di fette di Silicio.
+Esperimento di studio del processo di erosione ([dry etching](https://en.wikipedia.org/wiki/Etching_(microfabrication))) di fette di Silicio.
 
 Fattori:
 
@@ -441,12 +441,20 @@ df %>%
 
 # Misure ripetute, ma trattamenti non ripetuti
 
+Un ricercatore deve valutare l'effetto dei parametri di un processo di ossidazione superficiale di fette di silicio. Il processo mira ad ottenere uno strato superficiale isolante di $\mathrm{SiO_2}$, di **spessore controllato**, mediante esposizione delle fette ad un flusso di Ossigeno ad alta temperatura.
+
+È importante controllare sia lo spessore di ossido ottenuto (che è un indice di prestazione), sia l'uniformità di tale spessore (che è un indice di qualità). I parametri sono quindi:
+
 * A: temperatura
-* B: tempo
+* B: tempo 
 * C: pressione
-* D: flusso del gas
-* Resa t: spessore medio dello strato di ossido
-* Resa v: varianza (o la deviazione standard) dello spessore di ossido
+* D: flusso gas
+* Resa t: spessore **medio** di ossido
+* Resa v: varianza dello spessore in diversi punti della stessa fetta
+
+Si tratta di un piano fattoriale $2^4$, e per contenere i costi il ricercatore decide di non eseguire ripetizioni, ma piuttosto di ripetere **le misure** in quattro diverse posizioni di ciascuna fetta.
+
+La *design matrix* del PF è quindi:
 
 ```{r}
 dm <- fp_design_matrix(4, rep=1) %>% 
@@ -455,14 +463,21 @@ dm <- fp_design_matrix(4, rep=1) %>%
     C = "Pressure", D = "Flow"
   )
 
-dm
+dm %>% head()
 ```
+
+Le misure di spessore in 4 punti, `t1--t4`, **riportate nell'ordine standard di Yates**, sono disponibili in un file .csv separato:
 
 ```{r}
 y <- examples_url("duplicate.csv") %>% read.csv() %>% 
   mutate(StdOrder = 1:n(), .before = t1)
-y
+y %>% head()
 ```
+
+Ora dobbiamo unire `y` con la tabella `dm`. Dato che le righe di `y` rispettano l'ordine di Yates (lo stesso seguito per la *design matrix*), possiamo collegare direttamente le due tabelle fianco a fianco mediante `bind_cols()`. 
+
+Successivamente dobbiamo calcolare la media e la varianza delle colonne `t1--t4`. Dobbiamo applicare le statistiche *per riga*, elemento per elemento, anziché *per colonna* come faremmo con un semplice `mutate()`. Per farlo dobbiamo prima istruire `mutate()` che le operazioni vanno condotte elemento per elemento: ciò si ottiene con `rowwise()`:
+
 
 ```{r}
 dm <- dm %>% 
@@ -479,10 +494,23 @@ dm <- dm %>%
 head(dm)
 ```
 
+È un PF **non ripetuto**, quindi posso costruire il modello lineare **ma non posso analizzare la varianza** perché avendo un solo punto per trattamento non ho ridondanza e non posso calcolare le somme quadratiche. Questa situazione è evidenziata da `anova()` con un messaggio di allerta:
+
 ```{r}
 dm.lm <- lm(t~A*B*C*D, data=dm)
 anova(dm.lm)
 ```
+
+Devo quindi applicare il metodo di Daniel: realizzo un grafico Q-Q degli effetti: quelli che staranno fuori dalla diagonale sono effetti significativi; gli altri possono essere rimossi dal modello.
+
+Posso crearmi direttamente il grafico notando che dal vettore nominato degli effetti:
+
+```{r}
+dm.lm$effects
+```
+devo eliminare il primo elemento, chiamato `(Intercept)`, che rappresenta la media complessiva di tutte le misure.
+
+Mi costruisco quindi una tabella con tutti gli effetti in una colonna e i rispettivi nomi nell'altra, che userò come etichette nel grafico Q-Q:
 
 ```{r}
 tibble(
@@ -497,14 +525,22 @@ tibble(
   geom_label(aes(x=-2.5, y=value, label=term))
 ```
 
+Più rapidamente, posso usare la libreria `adas.utils::daniel_plot_hn()` per ottenere un diagramma semi-normale (*half-normal plot*):
+
 ```{r}
 daniel_plot_hn(dm.lm, nlab=6)
 ```
+
+**Nota**: si chiama *halfnorm* perché considera i valori assoluti dei campioni, che quindi sono distribuiti solo su metà della gaussiana. Questo approccio ha il vantaggio di rendere più densi i punti sfruttando la simmetria della distribuzione.
+
+In ogni caso, osserviamo che gli unici effetti significarvi sono `A`, `B`, `A:B`, `A:C`, `C`. Possiamo riformulare il modello e verificare con ANOVA:
 
 ```{r}
 dm.lm <- lm(t ~ A*B + A*C + B:D, data=dm)
 anova(dm.lm)
 ```
+
+**Nota**: in caso di dubbio, è meglio essere conservativi nell'analisi del grafico Q-Q e includere anche termini dubbi (ad esempio `B:D`), e poi verificarne con l'ANOVA l'effettiva significatività.
 
 ```{r}
 dm.lm <- lm(t ~ A*B + A*C, data=dm)
@@ -513,6 +549,10 @@ anova(dm.lm)
 
 **ESERCIZIO**: effettuare l'analisi di adeguatezza del modello
 
+
+Possiamo finalmente produrre la superficie di risposta, usando il solito metodo. Rispetto al primo esempio, siccome abbiamo un fattore in più, calcoliamo le superfici di risposta per i due fattori più importanti `A` e `B`, e sfaccettiamo i grafici per 6 livelli di `C` (6 livelli perché così otteniamo 2 righe e tre colonne di grafici).
+
+Inoltre, marchiamo con due curve di livello rosse il dominio operativo desiderato, cioè le combinazioni di parametri a cui corrisponde uno spessore di ossido nella fascia di tolleranza $400\pm 10~\mathrm{nm}$, che è quella richiesta per superare il controllo di qualità.
 
 ```{r}
 rs <- expand.grid(
@@ -530,9 +570,19 @@ rs %>%
   facet_wrap(~ factor(C))
 ```
 
+Quindi una qualsiasi combinazione di parametri A, B e C che rimangono tra le due curve rosse ganantisce che la resa del processo sia in tolleranza.
+
+
+Ora dobbiamo analizzare la varianza dell'ossido (colonna `v` della matrice di progetto). Anche in questo caso non avendo repliche procediamo direttamente al grafico di Daniel per un modello lineare completo: 
+
+
 ```{r}
 daniel_plot_hn(lm(v ~ A*B*C*D, data=dm), nlab=7)
 ```
+
+Il grafico è di difficile interpretazione, perché fuori dalla diagonale abbiamo soprattutto interazioni di alto livello, cosa poco credibile. Spesso ciò è indice di un modello non adatto, che richiede una trasformazione. Tuttavia, non avendo ancora ripetizioni, non possiamo applicare il metodo di Box-Cox; non ci resta quindi che provare alcune trasformazioni, più o meno a caso. È logico però aspettarsi che la varianza cresca poco o addirittura diminuisca all'aumentare dello spessore di ossido. Quindi le trasformazioni di interesse possono essere il logaritmo o l'inversa.
+
+Usiamo la libreria `patchwork` per combinare più grafici. Sommando i grafici si affiancano, dividendoli si sovrappongono.
 
 ```{r}
 library(patchwork)
@@ -540,10 +590,13 @@ daniel_plot_hn(lm(1/v ~ A*B*C*D, data=dm), nlab=7) +
 daniel_plot_hn(lm(log(v) ~ A*B*C*D, data=dm), nlab=7)
 ```
 
+La trasformazione con meno interazioni di alto livello fuori dalla diagonale è l'inversa:
+
 ```{r}
-dm.lmv <- lm(1/v ~ A*B, data=dm) 
-dm.lmv %>% anova()
+lm(1/v~A*B + A:D + B:D, data=dm) %>% anova()
 ```
+
+Tuttavia, visto che `D` non ha effetti sullo spessore lo rimuoviamo anche dal modello sulla varianza. Uniamo le due superfici di risposta, riportando la deviazione standard anziché la varianza (più comoda) e impostando una soglia minima alla deviazione standard dello spessore pari a $1.4~\mathrm{nm}$:
 
 ```{r}
 rs %>% 
@@ -557,14 +610,19 @@ rs %>%
   facet_wrap(~ factor(C))
 ```
 
+Quindi, le zone comprese tra le curve rosse e quelle arancio rappresentano il **dominio operativo dei parametri**: cioè il processo va mantenuto all'interno di questo dominio per rispettare i requisiti sullo spessore e sulla varianza dello spessore dell'ossido di Silicio.
 
 # Impianto di filtrazione
 
+Questa volta il processo è una filtrazione per un liquame con sospensione solida. I parametri sono:
+
 * A: temperatura
 * B: differenza di pressione
-* C: concentrazione di specie solida
+* C: concentrazione della specie solida
 * D: velocità di agitazione
-* Resa: velocità di filtrazione
+* Resa Y: velocità di filtrazione
+
+Si tratta di un PF $2^4$, ancora non replicato. La *matrice di progetto* è:
 
 ```{r}
 dm <- fp_design_matrix(4, rep=1) %>% 
@@ -584,28 +642,43 @@ dm <- fp_design_matrix(4, rep=1) %>%
 sum(dm$Y)
 ```
 
+Come sempre realizziamo prima un modello completo da verificare col metodo di Daniel:
+
 ```{r}
 daniel_plot_hn(lm(Y ~ A*B*C*D, data=dm), nlab=10)
 ```
 
+Riformuliamo il modello con solo i termini `A`, `C`, `D` e le loro interazioni:
+
 ```{r}
-dm.lm <- lm(Y ~ A*C + A*D, data=dm)
+dm.lm <- lm(Y ~ A*C*D, data=dm)
 anova(dm.lm)
 ```
 
+La tabella ANOVA conferma che possiamo tenere solo le interazioni `A:C` e `A:D`:
+
+
 ```{r}
+dm.lm <- lm(Y ~ A*C + A*D, data=dm)
 dm <- dm %>% 
   add_residuals(dm.lm) %>% 
   add_predictions(dm.lm)
 
-dm %>% 
-  ggplot(aes(x=pred, y=resid)) + 
-  geom_point()
+p1 <- dm %>% ggplot(aes(x=pred, y=resid)) + geom_point()
+p2 <- dm %>% ggplot(aes(x=A, y=resid)) + geom_point()
+p3 <- dm %>% ggplot(aes(x=C, y=resid)) + geom_point()
+p4 <- dm %>% ggplot(aes(x=D, y=resid)) + geom_point()
+
+(p1 + p2) / (p3 + p4)
 ```
+
+I residui tendono ad allargarsi con il valore predetto, quindi è opportuno verificare se c'è una trasformazione Box-Cox adatta:
 
 ```{r}
 car::boxCox(dm.lm)
 ```
+
+Il valore di $\lambda$ è vicino a -0.5, cioè l'inverso della radice: $y^*=1/\sqrt{y}$:
 
 ```{r}
 dm.lm <- lm(1/sqrt(Y) ~ A*C + A*D, data=dm)
@@ -618,12 +691,35 @@ dm <- dm %>%
   add_residuals(dm.lm) %>% 
   add_predictions(dm.lm)
 
-dm %>% 
-  ggplot(aes(x=pred, y=resid)) + 
-  geom_point()
+p1 <- dm %>% ggplot(aes(x=pred, y=resid)) + geom_point()
+p2 <- dm %>% ggplot(aes(x=A, y=resid)) + geom_point()
+p3 <- dm %>% ggplot(aes(x=C, y=resid)) + geom_point()
+p4 <- dm %>% ggplot(aes(x=D, y=resid)) + geom_point()
+
+(p1 + p2) / (p3 + p4)
 ```
 
+Il modello sembra sensibilmente più adatto, quindi lo accettiamo definitivamente.
+
 ## Diagramma di Pareto
+
+Ci restano da realizzare i grafici di interazione (o la superficie di risposta, lasciata per esercizio, vedi soluzione a fine sezione). Per decidere come organizzare questi grafici è utile analizzare quali fattori hanno l'effetto maggiore.
+
+In questi casi è utile ordinare gli effetti dei fattori e delle interazioni in ordine decrescente per meglio valutarne l'importanza in modo da sapere su quali fattori conviene intervenire per avere il massimo guadagno sulla resa. Questo tipo di analisi può essere condotta efficacemente con il [diagramma di Pareto](https://it.wikipedia.org/wiki/Diagramma_di_Pareto), che riporta come barre il valore assoluto degli effetti (ordinati in modo decrescente) e come linea spezzata il peso cumulato degli effetti. Questo grafico consente di fare affermazioni del tipo "i primi $n$ termini pesano per l'80% del totale". 
+
+È il tipo di grafico che viene ad esempio utilizzato, ad esempio:
+
+* per analisi di censo: "il 5% della popolazione detiene il 90% della ricchezza"
+* per analisi di sensitività nella propagazione dell'incertezza: "i primi 3 termini sono responsabili dell'85% dell'incertezza complessiva"
+
+Nel nostro caso possiamo qualificare gli effetti dei termini del modello. Per semplicità, il grafico di Pareto può essere costruito con la funzione `pareto_chart()` messa a disposizione dal pacchetto `adas.utils`. 
+
+La funzione `pareto_chart()` è una funzione generica, che accetta come primo argomento:
+
+* un qualsiasi data frame, nel qual caso richiede il nome di due colonne, una coi valori e una con le categorie;
+* un modello lineare, nel qual caso valuta gli effetti.
+
+In generale, per un data frame:
 
 ```{r}
 set.seed(1)
@@ -634,16 +730,28 @@ tibble(
   pareto_chart(labels=cat, values=val)
 ```
 
+Nel nostro caso, possiamo confrontare il grafico di Pareto per il modello finale con il modello completo:
+
 ```{r}
 pareto_chart(dm.lm) /
 pareto_chart(lm(Y~A*B*C*D, data=dm))
 ```
+
+Si osserva che la curva cumulata ha un ginocchio pronunciato al di sopra dei primi 5 effetti che sono quelli statisticamente significativi. In ogni caso, i primi 5 effetti sono responsabili del 80% del contributo sul modello completo; nel modello ridotto agli effetti significativi (quello adottato per i grafici di interazione), il 70% della resa è governato dai fattori `A`, `C` e dalla loro interazione. In altre parole, la velocità di filtrazione è governata principalmente da temperatura e concentrazione.
+
+Quindi realizziamo i grafici di interazione tra `A` e `C`, sfaccettati per `D`, ricordandoci di anti-trasformare le predizioni (aggiunte con `add_predictions`).
 
 **ESERCIZIO**: realizzare i grafici di interazione per il modello finale.
 **ESERCIZIO**: realizzare superfici di risposta per il modello finale.
 
 
 # Filtrazione: CCD
+
+Il modello sopra descritto per l'impianto di filtrazione è un modello di primo grado in tutti i fattori. Avendo solo due livelli per fattore è evidente che non è possibile stimare alcun effetto di grado superiore al primo.
+
+Per verificare se sia necessario indagare una **curvatura della superficie di risposta** possiamo **aumentare** il piano fattoriale con un trattamento centrale, cioè la combinazione in cui tutti i fattori di interesse sono a livello 0 in unità codificate. Questo trattamento deve essere in genere ripetuto alcune volte. 
+
+Nel nostro caso ripetiamo il trattamento centrale 5 volte, aggiungendo i valori al data frame originale:
 
 ```{r}
 dm.c <- dm %>% 
@@ -652,12 +760,24 @@ dm.c <- dm %>%
   mutate(
     Y = c(dm$Y, c(91, 90, 90, 89, 91))
   )
+
+dm.c %>% tail()
 ```
+
+Ora al modello `Y~A*C+A*D` ricavato sopra aggiungiamo il quadrato **di uno qualsiasi dei tre fattori**:
 
 ```{r}
 dm.c.lm <- lm(1/sqrt(Y) ~ A*C + A*D + I(A^2), data=dm.c)
 anova(dm.c.lm)
 ```
+
+**NOTA**: provare a usare `I(C^2)` o `I(D^2)`: il contenuto della tabella rimane esattamente lo stesso.
+
+Il termine quadratico `I(A^2)` risulta significativo, quindi la superficie di risposta è convessa e richiede un modello lineare (almeno) di secondo grado. Si noti che il trattamento zero ovviamente mi permette solo di capire **se c'è convessità**, ma non a quale (o a quali) dei fattori è dovuta questa convessità: per saperlo, dovremmo aggiungere anche i trattamenti assiali e valutare un modello in cui tutti i fattori compaiono al quadrato.
+
+Per brevità saltiamo questo passo, che sarebbe equivalente all'analisi del piano fattoriale $3^2$ visto sopra per la vita di un utensile.
+
+Visualizziamo invece i nuovi punti sul grafico di interazione: si nota come si trovino più in alto (punti verdi) rispetto al valore predetto dal modello quando tutti i fattori sono a 0, cioè un valore di circa 67 (punto nero).
 
 ```{r}
 dm.c %>% 
