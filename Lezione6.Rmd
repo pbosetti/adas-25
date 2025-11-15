@@ -599,6 +599,7 @@ lm(1/v~A*B + A:D + B:D, data=dm) %>% anova()
 Tuttavia, visto che `D` non ha effetti sullo spessore lo rimuoviamo anche dal modello sulla varianza. Uniamo le due superfici di risposta, riportando la deviazione standard anziché la varianza (più comoda) e impostando una soglia minima alla deviazione standard dello spessore pari a $1.4~\mathrm{nm}$:
 
 ```{r}
+dm.lmv <- lm(1/v~A*B, data=dm)
 rs %>% 
   add_predictions(dm.lmv, var="v") %>% 
   ggplot(aes(x=A, y=B, z=t)) + 
@@ -742,8 +743,45 @@ Si osserva che la curva cumulata ha un ginocchio pronunciato al di sopra dei pri
 Quindi realizziamo i grafici di interazione tra `A` e `C`, sfaccettati per `D`, ricordandoci di anti-trasformare le predizioni (aggiunte con `add_predictions`).
 
 **ESERCIZIO**: realizzare i grafici di interazione per il modello finale.
+
+```{r}
+dm %>% 
+  mutate(Cf=factor(C), Df=paste("Vel. agitazione:", D)) %>% 
+  add_predictions(dm.lm) %>% 
+  ggplot(aes(x=A, y=1/pred^2, linetype=Cf)) +
+  geom_line() +
+  geom_point() +
+  geom_point(aes(y=Y, color=Cf)) +
+  facet_wrap(~Df) +
+  labs(
+    x="Temperatura",
+    y="vel. filtrazione (l/min)", 
+    color="Conc.", linetype="Conc.")
+```
+
+Possiamo interpretarli come segue:
+
+* Se la concentrazione delle specie solide è bassa, aumentare la temperatura riduce la viscosità e quindi facilita la filtrazione
+* se la concentrazione è alta, ma la velocità di agitazione è bassa, le specie solide tendono a intasare prima il filtro, riducendo la velocità di filtrazione; aumentare la temperatura accelera questo fenomeno, e quindi riduce ulteriormente la velocità media
+* se la concentrazione è alta ma la velocità di agitazione è anche alta, viene evitata la saturazione del filtro, e la velocità di filtrazione in generale ne guadagna, anche aumentando la temperatura.
+
+Secondo logica, la differenza di pressione dovrebbe avere un effetto, ma l'analisi della varianza lo smentisce. In realtà, ciò non significa che la differenza di pressione non abbia effetto sulla velocità di filtrazione in assoluto, ma piuttosto che **per l'intervallo di pressione in oggetto** la variazione di velocità risultante non è statisticamente significativa.
+
 **ESERCIZIO**: realizzare superfici di risposta per il modello finale.
 
+```{r}
+expand.grid(
+  A = seq(-1, 1, length.out=50),
+  C = seq(-1, 1, length.out=50),
+  D = c(-1, 1)
+) %>% 
+  add_predictions(dm.lm) %>% 
+  ggplot(aes(x=A, y=C, z=1/pred^2)) + 
+  metR::geom_contour_fill(bins=15) +
+  metR::geom_contour2(aes(label=(after_stat(level)) %>% round(2)), bins=15) +
+  facet_wrap(~factor(D)) +
+  scale_fill_viridis_c()
+```
 
 # Filtrazione: CCD
 
