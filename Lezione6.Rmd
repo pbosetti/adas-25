@@ -847,7 +847,7 @@ dm.c %>%
 
 # Piano fattoriale frazionato
 
-Processo di fotolitografia di circuiti stampati
+Studiamo un processo di **litografia di circuiti stampati**, dipendente da 5 parametri:
 
 * A: rapporto focale dell'ottica,
 * B: tempo di esposizione
@@ -856,7 +856,9 @@ Processo di fotolitografia di circuiti stampati
 * E: tempo di attacco chimico
 * Y: resa quantitativa del processo
 
-Relazione definente: $I=ABCDE$
+Per limitare il numero di prove realizziamo un piano fattoriale frazionato una volta, cioè $2^{5-1}$ non ripetuto, con relazione definente $I=ABCDE$.
+
+Si parte con una design matrix completa e la si fraziona mediante `fp_fraction()`, passando come argomento la parte destra della relazione definente, come formula:
 
 ```{r}
 dm <- fp_design_matrix(5) %>% 
@@ -873,21 +875,27 @@ dm <- fp_design_matrix(5) %>%
 dm$Y %>% sum()
 ```
 
+Dato che il piano fattoriale non è replicato, dobbiamo applicare il metodo di Daniel:
+
 ```{r}
 lm(Y~A*B*C*D*E, data=dm) %>% 
   daniel_plot_hn(nlab=10)
 ```
+
+Cautelativamente eliminiamo solo i fattori `D` e `E`:
 
 ```{r}
 lm(Y~A*B*C, data=dm) %>% 
   anova()
 ```
 
+Possiamo raffinare ulteriormente il modello rimuovendo i termini non significativi, realizzando poi anche il diagramma di Pareto per valutare la relativa importanza degli effetti:
+
 ```{r}
 dm.lm <- lm(Y~A*B + C, data=dm)
 pareto_chart(dm.lm)
 ```
-Grafico di interazione:
+Realizziamo ora il grafico di interazione, tenendo in ascissa il fattore con l'effetto maggiore:
 
 ```{r}
 dm %>% 
@@ -897,12 +905,19 @@ dm %>%
   geom_line(aes(linetype=A)) + 
   geom_point() +
   geom_point(aes(y=Y, color=A)) +
-  facet_wrap(~C)
+  facet_wrap(~C, labeller=label_both)
 ```
+
+Quindi:
+
+* Aumentare B aumenta sempre la resa, e lo stesso vale per A e per C (ma in misura minore)
+* La resa massima si ha quando tutti e tre i fattori sono a livello alto
+* L'interazione tra A e B si evince dal fatto che le rette non sono parallele; anche se hanno comunque una pendenza simile, il fatto che l'interazione `A:B` risulti significativa nell'ANOVA significa che la differente pendenza è **statisticamente significativa**.
+
 
 # Impianto di filtrazione v.2
 
-Richiamiamo il piano fattoriale per l'impiantoi di filtrazione e *facciamo finta* di aver eseguito solo metà delle prove, compatibilmente con un PF frazionato con relazione definente $I=ABCD$
+Richiamiamo il piano fattoriale per l'impianti di filtrazione e *facciamo finta* di aver eseguito solo metà delle prove, compatibilmente con un PF frazionato $2^{4-1}$ con relazione definente $I=ABCD$. 
 
 ```{r}
 dm <- fp_design_matrix(4, rep=1) %>% 
@@ -920,7 +935,7 @@ dm <- fp_design_matrix(4, rep=1) %>%
   )
 ```
 
-Teniamo solo le righe per cui vale la relazione definente $I=ABCD$, cioè $D=ABC$
+Ci basta quindi tenere solo metà della tabella, cioè solo le righe in cui vale la relazione definente, ri-arrangiata come $D=ABC$:
 
 ```{r}
 dmf <- dm %>% 
@@ -929,30 +944,46 @@ dmf <- dm %>%
 dmf
 ```
 
+Non avendo repliche proviamo ad applicare il metodo di Daniel:
 
 ```{r}
 lm(Y~A*B*C*D, data=dmf) %>% 
   daniel_plot_hn(nlab=5)
 ```
+Dato che i punti sono pochi, il grafico risulta poco chiaro e di interpretazione incerta. Generalmente un diagramma quantile-quantile (eventualmente in forma semi-normale come qui) richiede almeno una ventina di punti per essere affidabile. Quando i punti sono pochi, come in questo caso, è più utile il diagramma di Pareto:
 
 ```{r}
 lm(Y~A*B*C*D, data=dmf) %>% 
   pareto_chart()
 ```
+
+Osserviamo che:
+
+* gli effetti `A`, `C` e `D` sono cospicui, dato che è poco probabile che lo siano anche le interazioni in alias `BCD`, `ABD` e `ABC`
+* l'effetto `AB+CD` è trascurabile, a meno che `AB` e `CD` siano entrambi grandi ma di segno inverso, il che è poco probabile
+* `BC` è in alias con `AD`
+* dato che `A`, `C` e `D` sono cospicui, possiamo aspettarci che lo siano `AC` e `AD`, piuttosto che `BC` e `BD`
+
+Quindi rivediamo il modello come:
+
 ```{r}
 dmf.lm <- lm(Y~A*C + A*D, data=dmf)
 anova(dmf.lm)
 ```
 
+Verifichiamo se sia necessaria una trasformazione di Box-Cox:
+
 ```{r}
 car::boxCox(dmf.lm)
 ```
+
+La trasformazione più adatta è quindi $y^*=y^{1/2}$, anche se l'intervallo di confidenza è molto ampio, cioè qualsiasi trasformazione ha un impatto inferiore al 5%:
 
 ```{r}
 dmf.lm <- lm(sqrt(Y)~A*C + A*D, data=dmf)
 ```
 
-
+I grafici di interazione sono quindi:
 
 ```{r}
 dmf %>% 
@@ -965,13 +996,18 @@ dmf %>%
   facet_wrap(~D, labeller = label_both)
 ```
 
+Confrontiamo questo modello con quello ricavato dal modello completo:
+
 ```{r}
 dm %>% 
   select(A:Y) %>% 
+  # Aggiungo le predizioni anti-trasformate per il modello completo:
   add_predictions(lm(1/sqrt(Y)~A*C + A*D, data=.), var="full") %>% 
   mutate(full=1/full^2) %>% 
+  # Aggiungo le predizioni anti-trasformate per il modello frazionato:
   add_predictions(lm(sqrt(Y)~A*C + A*D, data=.), var="half") %>% 
   mutate(half = half^2) %>% 
+  # pivot, in modo da avere anche il tipo di modello come estetica del plot:
   pivot_longer(-(A:Y), names_to = "model", values_to = "pred") %>% 
   ggplot(aes(x=A, y=pred)) + 
   geom_line(aes(linetype=factor(C), color=model)) +
@@ -979,3 +1015,24 @@ dm %>%
   facet_wrap(~D, labeller=label_both)
 ```
 
+Cioè: pur essendo ricavato sulla metà delle osservazioni, il modello ottenuto dal piano fattoriale frazionato è comunque in buon accordo con quello ottenuto dal PF completo. 
+
+> Di fatto, per PF da $2^5$ in su è molto comune ricorrere a frazionamenti, anche perché più lunghe sono le relazioni definenti meno gli alias risultano difficili da sciogliere (perché gli alias riguardano sempre più interazioni di alto grado, poco probabili in virtù del **principio di sparsità degli effetti**).
+
+L'ultimo grafico può anche essere ottenuto usando `facet_grid()`, che consente di sfaccettare il grafico per due estetiche anziché una:
+
+```{r}
+dm %>% 
+  select(A:Y) %>%
+  add_predictions(lm(1/sqrt(Y)~A*C + A*D, data=.), var="full") %>% 
+  mutate(full=1/full^2) %>% 
+  add_predictions(lm(sqrt(Y)~A*C + A*D, data=.), var="half") %>% 
+  mutate(half = half^2) %>% 
+  pivot_longer(-(A:Y), names_to = "model", values_to = "pred") %>% 
+  ggplot(aes(x=A, y=pred, color=factor(C))) + 
+  geom_line() +
+  geom_point() + 
+  facet_grid(model~D, labeller=label_both) + 
+  labs(color="C")
+```
+> **NOTA**: `facet_grid()` è analoga a `facet_wrap()`: mentre la seconda sfaccetta i grafici per i diversi livelli assunti da **una** variabile categorica in sequenza, la prima realizza una matrice di grafici in cui righe e colonne riportano diversi livelli di **due** variabili categoriche.
