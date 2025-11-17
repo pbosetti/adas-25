@@ -834,7 +834,7 @@ dm.c %>%
   facet_wrap(
     ~D, # un grafico per ogni livello di D
     labeller = \(labels) map(labels, ~paste("D:", .))) + # cambia etichette di D
-  labs(y="Yield", color="D (data)", linetype="D (model)") # etichette legenda
+  labs(y="Yield", color="C (data)", linetype="C (model)") # etichette legenda
 ```
 
 **Note**: 
