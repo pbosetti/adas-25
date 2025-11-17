@@ -842,3 +842,140 @@ dm.c %>%
 - quando si vuole usare una colonna numerica come parametro di raggruppamento (per colore, tipo di linea, tipo di punto...), la colonna va convertita in `factor`
 - `facet_wrap` usa come intestazione di ogni grafico (in grigio in alto) il valore della corrispondente colonna. Se si vuole modificare questo valore (es. da `1` a `D: 1`) si può usare l'opzione `labeller`. Questa vuole una funzione che accetta in ingresso una lista di etichette e deve restutuire una analoga lista di etichette modificate. Ad es., riceve `list("-1", "0", "1")` e deve restituire `list("D: -1", "D: 0", "D: 1")`. Ciò può essere ottenuto con una `map()`
 - `labs()` vuole i nomi di etichette di ogni estetica, ad es. `x`, `color` o `linetype`. Se due estetiche come `color` e `linetype` hanno etichette diverse, vengono create altrettante legende; se invece (default) hanno la stessa etichetta, si ottiene un'unica legenda composita (in questo caso meno leggibile).
+
+
+
+# Piano fattoriale frazionato
+
+Processo di fotolitografia di circuiti stampati
+
+* A: rapporto focale dell'ottica,
+* B: tempo di esposizione
+* C: tempo di sviluppo del fotoresist
+* D: parametro di dimensione della maschera
+* E: tempo di attacco chimico
+* Y: resa quantitativa del processo
+
+Relazione definente: $I=ABCDE$
+
+```{r}
+dm <- fp_design_matrix(5) %>% 
+  fp_fraction(~A*B*C*D*E) %>% 
+  mutate(
+    Y = c(
+      9, 34, 16, 60,
+      6, 50, 21, 44,
+      8, 52, 22, 45,
+      10, 30, 15, 63
+    )
+  )
+
+dm$Y %>% sum()
+```
+
+```{r}
+lm(Y~A*B*C*D*E, data=dm) %>% 
+  daniel_plot_hn(nlab=10)
+```
+
+```{r}
+lm(Y~A*B*C, data=dm) %>% 
+  anova()
+```
+
+```{r}
+dm.lm <- lm(Y~A*B + C, data=dm)
+pareto_chart(dm.lm)
+```
+Grafico di interazione:
+
+```{r}
+dm %>% 
+  add_predictions(dm.lm) %>% 
+  mutate(A=factor(A), C=factor(C)) %>% 
+  ggplot(aes(x=B, y=pred)) + 
+  geom_line(aes(linetype=A)) + 
+  geom_point() +
+  geom_point(aes(y=Y, color=A)) +
+  facet_wrap(~C)
+```
+
+# Impianto di filtrazione v.2
+
+Richiamiamo il piano fattoriale per l'impiantoi di filtrazione e *facciamo finta* di aver eseguito solo metà delle prove, compatibilmente con un PF frazionato con relazione definente $I=ABCD$
+
+```{r}
+dm <- fp_design_matrix(4, rep=1) %>% 
+  fp_add_names(
+    A="Temp", B="dPressure",
+    C="Conc", D="Stir"
+  ) %>% 
+  mutate(
+    Y = c(
+      45, 71, 48, 65,
+      68, 60, 80, 65,
+      43, 100, 45, 104,
+      75, 86, 70, 96
+    )
+  )
+```
+
+Teniamo solo le righe per cui vale la relazione definente $I=ABCD$, cioè $D=ABC$
+
+```{r}
+dmf <- dm %>% 
+  filter(D == A*B*C)
+
+dmf
+```
+
+
+```{r}
+lm(Y~A*B*C*D, data=dmf) %>% 
+  daniel_plot_hn(nlab=5)
+```
+
+```{r}
+lm(Y~A*B*C*D, data=dmf) %>% 
+  pareto_chart()
+```
+```{r}
+dmf.lm <- lm(Y~A*C + A*D, data=dmf)
+anova(dmf.lm)
+```
+
+```{r}
+car::boxCox(dmf.lm)
+```
+
+```{r}
+dmf.lm <- lm(sqrt(Y)~A*C + A*D, data=dmf)
+```
+
+
+
+```{r}
+dmf %>% 
+  add_predictions(dmf.lm) %>% 
+  mutate(C=factor(C), D=factor(D)) %>% 
+  ggplot(aes(x=A, y=pred^2)) + 
+  geom_line(aes(linetype=C)) +
+  geom_point() +
+  geom_point(aes(y=Y, color=C)) +
+  facet_wrap(~D, labeller = label_both)
+```
+
+```{r}
+dm %>% 
+  select(A:Y) %>% 
+  add_predictions(lm(1/sqrt(Y)~A*C + A*D, data=.), var="full") %>% 
+  mutate(full=1/full^2) %>% 
+  add_predictions(lm(sqrt(Y)~A*C + A*D, data=.), var="half") %>% 
+  mutate(half = half^2) %>% 
+  pivot_longer(-(A:Y), names_to = "model", values_to = "pred") %>% 
+  ggplot(aes(x=A, y=pred)) + 
+  geom_line(aes(linetype=factor(C), color=model)) +
+  geom_point(aes(color=model)) + 
+  facet_wrap(~D, labeller=label_both)
+```
+
