@@ -1,5 +1,5 @@
 ---
-title: "Lezione3"
+title: "Lezione 4"
 author: "Paolo Bosetti"
 date: "`r Sys.Date()`"
 output:
@@ -16,5 +16,348 @@ knitr::opts_chunk$set(
   fig.dim = c(8, 5), # rapporto L/H figure
   out.width="10cm"   # dimensioni effettive figure
 )
+
+library(tidyverse)
+library(boot)
 ```
 
+
+# Bootstrap non parametrico
+
+Calcoliamo l'intervallo di confidenza per la media campionaria di un singolo campione (equivalente di un T-test a un campione a due lati).
+
+Creiamo una tabella di dati e utilizziamo la funzione `boot()` per calcolare i **campioni di bootstrap**, cioè le $R$ repliche del calcolo della statistica di interesse (media) su altrettanti campioni ottenuti dal campione di partenza mediante ricampionamento con reinserimento.
+
+Si noti che l'argomento `statistic` di `boot()` deve essere una funzione con due argomenti: al primo viene passato il vettore dei dati originali; al secondo argomento viene passato, di volta in volta e per `R` volte, il vettore degli indici corrispondenti a ciascun campione di bootstrap (e sono tutti vettori lunghi tanto quanto il vettore dei dati originali):
+
+```{r}
+set.seed(1)
+R <- 50000
+data <- runif(100, 1, 10)
+
+data.b <- boot(
+  data,
+  statistic = \(x, i) mean( x[i] ),
+  R = R
+)
+
+data.b
+```
+
+Attenzione: il parametro `statistic` deve essere una funzione con due argomenti. Ad ogni chiamata (e per `R` volte), questa funzione riceve come primo argomento il set di dati originale, e come secondo argimento un vettore di indici, lungo quanto il campione originale e con i valori casualmente ricampionati (con reinserimento). Quindi la funzione statistica in esame, in questo caso `mean()` deve ricevere `x[i]`, che è l'i-esimo campione di bootstrap.
+
+
+Come altre funzioni R, `boot()` stampa delle informazioni e *restituisce un oggetto*. Per il contenuto dell'oggetto è utile consultare l'help della funzione e aprire l'oggetto `data.b` dal pannello `Envoronment` di RStudio.
+
+Si noti che l'oggetto `data.b` contiene il campo `data.b$t`, che è un vettore di `R` componenti e contiene il valore della statistica di interesse valutata su tutti gli `R` campioni di bootstrap. La media di queste medie è:
+
+```{r}
+mean(data.b$t)
+```
+
+In particolare, la tabella finale dell'output riporta la statistica studiata, indicata come `t1*`, il suo valore base, cioè nel nostro caso la media del campione originale `data`, il `bias` e l'errore standard, cioè la deviazione standard delle statistiche di bootstrap.
+
+Il bias è la differenza tra la media del campione originale e la media delle medie, e deve essere più piccolo possibile:
+
+```{r}
+mean(data.b$t) - mean(data)
+```
+
+Il `bias` può essere utilizzato per sapere quando `R` è abbastanza grande: il suo valore infatti diminuisce all'aumentare di `R` e tende a stabilizzarsi.
+
+Verifichiamolo:
+
+```{r}
+# inizializzo una tibble
+bias <- tibble(R=NA, bias=NA)
+# ripeto il boot per una sequenza crescente di valori di R:
+for (r in c(10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000)) {
+  d.b <- boot(data, statistic = \(x, i) mean( x[i] ), R = r)
+  b <- mean(d.b$t) - d.b$t0
+  bias <- bias %>% add_case(R=r, bias=b)
+} 
+bias <- slice_tail(bias, n=-1) # Rimuovo la prima riga che contiene NA
+```
+
+```{r}
+bias %>% 
+  ggplot(aes(x=R, y=bias)) + 
+  geom_line() + 
+  geom_point() + 
+  scale_x_log10()
+```
+
+Come si vede, in questo caso il bias tende a stabilizzarsi da circa 10000 campioni in su.
+
+**ATTENZIONE**: volendo replicare questo grafico per altri studi, è necessario correggere la riga `b <- mean(d.b$t) - d.b$t0` sostituendo `mean()` con la statistica di interesse!
+
+Ora possiamo indagare la **distribuzione** della statistica di interesse, in particolare valutandone l'intervallo di confidenza. La libreria `boot` fornisce la funzione apposita `boot.ci()`:
+
+```{r}
+(data.ci <- boot.ci(data.b, conf=0.95, type="perc"))
+```
+
+Qui utilizziamo il metodo dei percentili per determinare l'intervallo di confidenza, per cui specifichiamo `type="perc"`.
+
+L'oggetto `data.ci` contiene in particolare il campo `data.ci$percent`, che è un vettore: come scritto nell'help, il quarto e quinto elemento di questo vettore rappresentano l'intervallo di confidenza per la statistica in esame.
+
+Confrontiamo questi valori con quelli calcolati dal test di Student:
+
+```{r}
+(data.tt <- t.test(data))
+```
+
+Mettiamo in grafico il campione originale, i valori della statistica di bootstrap e i limiti degli intervalli di confidenza calcolati nei due modi:
+
+```{r}
+ci <- data.ci$percent[4:5]
+ci.tt <- data.tt$conf.int
+
+
+tibble(
+  i = 1:R,
+  t = data.b$t
+) %>% 
+  ggplot(aes(x = i, y = t)) + 
+  geom_point() + 
+  geom_point(data=tibble(i=1:100 * 500, t=data), color="orange") +
+  geom_hline(yintercept=ci.tt, color="green", linetype=2) +
+  geom_hline(yintercept=ci, color="red", linetype=2) 
+```
+
+È più utile in realtà utilizzare la funzione di distribuzione cumulativa empirica (ECDF, che rappresenta l'integrale progressivo dell'istogramma):
+
+```{r}
+tibble(
+  m = seq(4.5, 6.5, length.out=100),
+  p = ecdf(data.b$t)(m)
+) %>% 
+  ggplot(aes(x=m, y=p)) + 
+  geom_line() +
+  geom_vline(xintercept=ci, color="red", linetype=2) +
+  geom_hline(yintercept=c(2.5, 97.5)/100, linetype=2, color="darkgreen")
+```
+
+Cioè: i limiti dell'intervallo di confidenza sono i valori della ECDF in 2.5% e 97.5%.
+
+
+
+# Regressione lineare
+
+Consideriamo il caso di una regressione lineare di un modello di primo grado come il seguente:
+
+$$
+y = a + bx
+$$
+
+Vogliamo stimare l'intervallo di confidenza sui due parametri $a$ e $b$.
+
+Facciamo un esempio, generandoci un set di `r (N <- 10)` punti:
+
+```{r}
+set.seed(1)
+k <- c(a=10, b=2)
+N <- 100
+data <- tibble(
+  x = runif(N, 0, 10),
+  y = k["a"] + k["b"] * x + rnorm(N, sd=2)
+)
+
+data %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_point() + 
+  geom_smooth(method="lm", formula=y~x)
+```
+
+I valori delle due statistiche sono:
+
+```{r}
+lm(y~x, data=data) %>% coef()
+```
+
+Definisco una funzione "statistica", cioè che dato un campione mi restituisca un vettore con i due coefficienti. Anziché usare `lm()`, per esercizio calcolo i coefficienti con il metodo della *pseudo-inversa*, che in R si ottiene con `MASS::ginv()`:
+
+```{r}
+linfit <- function(data) {
+  N <- length(data$x)
+  A <- matrix(c(rep(1, N), data$x), nrow=N, byrow=F)
+  res <- as.vector(MASS::ginv(A) %*% data$y)
+  names(res) <- c("a", "b")
+  return(res)
+}
+linfit(data)
+```
+
+Posso ora usare questa funzione per il bootstrap:
+
+```{r}
+data.b <- boot(
+  data,
+  statistic = \(x, i) linfit(x[i,]),
+  R = 10000
+)
+data.b
+```
+
+Attenzione: l'a chiamata alla funzione è `linfit(x[i,])`, perché così otteniamo la tabella dei dati con le righe estratte casualmente (ricampionamento con reinserimento), e **tutte le righe**.
+
+Per estrarre gli intervalli di confidenza dobbiamo passare il termine `index=n` a `boot.ci`:
+
+```{r}
+boot.ci(data.b, type="perc", index=1) # c.i. per a
+boot.ci(data.b, type="perc", index=2) # c.i. per b
+```
+
+
+# Regressione non-lineare
+
+Per calcolare i limiti dell'intervallo di confidenza alla sezione precedente ci sarebbero anche metodi analitici. Infatti, la funzione `predict` consente di valutare il modello e di restiture la banda di confidenza attorno al modello.
+
+Tuttavia, se la funzione da regredire non è analitica e la regressione viene effettuata con il metodo dei minimi quadrati questi metodi non sono applicabili (infatti `predict.nls()` **non** calcola l'intervallo di confidenza!), mentre il bootstrap lo è.
+
+Consideriamo il modello di contatto visto nella sezione finale della regressione, che qui richiamiamo identico:
+
+```{r}
+f <- function(t, t0=0, bias=0, a=1) {
+  b <-  -2 * a * t0
+  c <- bias + a * t0^2
+  y <- a * t^2 + b*t + c
+  return(ifelse(t < t0, bias, y))
+}
+```
+
+Costruiamo su tale modello un set di dati:
+
+```{r}
+set.seed(1)
+contact <- 2.5
+bias <- 3
+a <- 1
+
+data <- tibble(
+  t = seq(-10, 10, length.out=100),
+  yn = f(t, contact, bias, a),
+  y = yn + rnorm(length(t), sd=2)
+)
+
+data %>% 
+  ggplot(aes(x=t, y=y)) + 
+  geom_point() + 
+  geom_line(aes(y=yn), color="red")
+
+```
+
+La regressione ai minimi quadrati è:
+
+```{r}
+fit <- nls(
+  y~f(t, t0, b, a), 
+  data=data, 
+  start=list(
+    t0 = 0,
+    b = 0,
+    a = 1
+  ))
+
+summary(fit)
+```
+
+Possiamo estrarre i parametri della regressione in questo modo:
+
+```{r}
+coef(fit)
+```
+
+Come sopra, per applicare il bootstrap dobbiamo definire una funzione che ci restituisca i parametri a partire dai dati:
+
+```{r}
+stats <- function(data) {
+  fit <- nls(
+  y~f(t, t0, b, a), 
+  data=data, 
+  start=list(
+    t0 = 0,
+    b = 0,
+    a = 1
+  ))
+  return(coef(fit))
+}
+
+stats(data)
+```
+
+Ora possiamo effettuare il bootstrap e calcolare gli intervalli di confidenza:
+
+```{r}
+data.b = boot(data, R=10000, statistic = \(x, i) stats(x[i,]) )
+ci <- list(
+  t0 = boot.ci(data.b, type="perc", index=1)$percent[4:5],
+  bias = boot.ci(data.b, type="perc", index=2)$percent[4:5],
+  a = boot.ci(data.b, type="perc", index=3)$percent[4:5]
+)
+ci
+```
+
+Possiamo visualizzare gli intervalli dei parametri `t0` e `bias` (i più interessanti per il caso in esame) come rettangoli:
+
+```{r}
+data %>% 
+  ggplot(aes(x=t, y=y)) + 
+  geom_rect(
+    xmin=ci$t0[1], 
+    xmax=ci$t0[2], 
+    ymin=-Inf, 
+    ymax=Inf, 
+    fill=gray(1/2)
+  ) +
+  geom_rect(
+    xmin=-Inf, 
+    xmax=Inf, 
+    ymin=ci$bias[1], 
+    ymax=ci$bias[2], 
+    fill=gray(1/2)
+  ) +
+  geom_point()
+```
+
+Per visualizzare la *banda di confidenza* dobbiamo costruirci una funzione che, per ogni valore del predittore `t`, calcoli il modello per tutte le possibili combinazioni estreme dei parametri nei rispettivi intervalli di confidenza, restituendo il massimo (bordo superiore) o il minimo (bordo inferiore). Le $2^3$ combinazioni di tre elementi con due livelli possono essere ricavate con `expand.grid()`:
+
+```{r}
+f_conf <- function(t, f, ci) {
+  df <- expand.grid(ci) %>% 
+    mutate(f = f(t, t0, bias, a))
+  return(list(lwr = min(df$f), upr = max(df$f)))
+}
+```
+
+Con questa funzione possiamo ora ottenere la banda di confidenza.
+
+**Attenzione**: la funzione `f_conf()` restituisce una lista, quindi la colonna `rng` è un vettore di liste:
+
+```{r}
+data %>% 
+  mutate(rng = map(t, ~ f_conf(., f, ci))) %>% 
+  head()
+```
+
+La funzione `dplyr::unnest_wider()` separa una colonna di liste in più colonne normali, usando i nomi degli elementi delle liste come nomi colonna (ovviamente tutte le liste devono avere la stessa struttura):
+
+```{r}
+data %>% 
+  mutate(rng = map(t, ~ f_conf(., f, ci))) %>%
+  unnest_wider(rng) %>% 
+  head()
+```
+
+Quindi infine possiamo realizzare il grafico con la banda di confidenza:
+
+
+```{r}
+data %>% 
+  mutate(rng = map(t, ~ f_conf(., f, ci))) %>%
+  unnest_wider(rng) %>% 
+  ggplot(aes(x=t, y=y)) + 
+  geom_point() + 
+  geom_line(aes(y=yn)) + 
+  geom_ribbon(aes(ymin=lwr, ymax=upr), alpha=1/2)
+```
