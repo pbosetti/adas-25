@@ -1,0 +1,346 @@
+---
+title: "Lezione 5 - Misura"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    toc: true
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(adas.utils)
+library(patchwork)
+library(PearsonDS)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Taratura statica di un dinamometro a mensola
+
+Consideriamo L'esempio visto [a lezione](https://paolobosetti.quarto.pub/slides/ADAS/5-misura.html#/esempio-dinamometro-a-mensola).
+
+Supponiamo di effettuare una operazione di taratura in condizioni di temperatura **non costante**, e supponiamo che la temperatura sia un **ingresso modificante** della caratteristica statica, agendo principalmente sul *gauge factor* dell'estensimetro. La caratteristica statica è:
+
+$$
+V=3/2GV_i\frac{lG_F}{EBH^2}F+V_0 = V_0+ KF
+$$
+
+Definiamo anzitutto una lista dei parametri che possiamo considerare costanti, con i loro valori.
+
+```{r}
+parameters <- list(
+  G = 10,  # NA
+  Vi = 12, # V
+  l = 300, # mm
+  B = 20,  # mm
+  H = 2,   # mm
+  E = 200, # GPa
+  V0 = 1   # V
+)
+```
+
+Il *gauge factor* è invece una funzione lineare della temperatura (perché la resistenza elettrica dell'estensimetro è funzione lineare della temperatura):
+
+```{r}
+Gf <- function(Temp, G0=0.05, T0=20, k=0.01) G0 + k*(Temp - T0)
+```
+
+Il coefficiente angolare della caratteristica statica $K$ è:
+
+```{r}
+K <- function(Temp, params) with(params, 3/2 * G * Vi * (l*Gf(Temp)) / (E * B * H^2))
+```
+
+Si noti che `with(params, ...)` consente di abbreviare l'espressione analitica evitando di ripetere `params$` davanti al nome di ciascun elemento della lista `parameters`.
+
+La caratteristica statica completa a questo punto possiamo assemblarla a partire dalle funzioni sopra dichiarate:
+
+```{r}
+model <- function(F, Temp, params) params$V0 + K(Temp, params)*F
+```
+
+Per ultimo definiamo l'andamento della temperatura: supponiamo che sia costante fino a 4h, e poi incrementi esponenzialmente con costante di tempo pari a 2h:
+
+```{r}
+temp <- function(time, t0=4, T0=20, dT=5, tau=2) {
+  ifelse(
+    time < t0,
+    T0,
+    T0 + dT * (1 - exp(-(time-t0)/tau))
+  )
+}
+```
+
+Verifichiamo con i grafici:
+
+```{r}
+(ggplot() + 
+  geom_function(fun = temp, xlim=c(0,20)) +
+  labs(x="Time (h)", y="Temperature (°C)")) +
+(ggplot() +
+  geom_function(fun = \(f) model(f, 20, parameters), xlim=c(0, 20), color="blue") + 
+  geom_function(fun = \(f) model(f, 25, parameters), xlim=c(0, 20), color="red") + 
+  labs(x="Force (N)", y="Voltage (V)"))
+```
+
+Si noti che abbiamo usato la libreria `patchwork`: essa consente di organizzare due o più grafici in matrice: l'operatore `+` affianca due grafici, `/` li sovrappone. È possibile combinarli: ad es. `(p1 + p2)/p3` presenta due grafici affiancati sopra un terzo a doppia larghezza.
+
+Ora possiamo crearci i dati che simulano l'esperimento:
+
+```{r}
+set.seed(120)
+N <- 50
+duration <- 8
+
+data <- tibble(
+  t = seq(0, duration, length.out=N),
+  Temp = temp(t),
+  Gf = Gf(Temp),
+  Force = seq(10, 100, length.out=N),
+  Vn = model(Force, Temp, parameters),
+  V = Vn + rnorm(N, 0, 0.5)
+)
+
+data %>% head()
+```
+
+In grafico:
+
+```{r}
+data %>% 
+  ggplot(aes(x=Force, y=V)) +
+  geom_point() + 
+  geom_hline(yintercept = parameters$V0, color="red", linetype=2) + 
+  labs(x="Force (N)", y="Voltage (V)")
+```
+
+A questo punto, l'addetto alla taratura (che non sa dell'effetto della temperatura, né della sua variazione!) prova a regredire la curva di taratura col modello lineare che si aspetta dalla fisica del problema:
+
+```{r}
+data.lm <- lm(V ~ Force, data=data)
+summary(data.lm)
+```
+
+Successivamente verifichiamo la regressione e i residui:
+
+```{r}
+data <- data %>% 
+  add_predictions(data.lm) %>% 
+  add_residuals(data.lm)
+
+(data %>% 
+  ggplot(aes(x=Force)) + 
+  geom_point(aes(y=V)) + 
+  geom_line(aes(y=pred), color="red")) + 
+(data %>% 
+  ggplot(aes(x=Force, y=resid)) + 
+  geom_point())
+```
+
+È evidente un pattern a V dei residui, che denuncia l'inadeguatezza (sotto-adattamento) del modello nel regredire i dati. L'operatore passa quindi a un modello di secondo grado:
+
+```{r}
+data.lm <- lm(V ~ poly(Force, 2, raw=T), data=data)
+summary(data.lm)
+```
+
+Dato che il termine di primo grado risulta non significativo, rivede ulteriormente il modello rimuovendolo:
+
+```{r}
+data.lm <- lm(V ~ I(Force^2), data=data)
+summary(data.lm)
+```
+
+Ora i residui sono più dispersi:
+
+```{r}
+data <- data %>% 
+  add_predictions(data.lm) %>% 
+  add_residuals(data.lm)
+
+(data %>% 
+  ggplot(aes(x=Force)) + 
+  geom_point(aes(y=V)) + 
+  geom_line(aes(y=pred), color="red")) + 
+(data %>% 
+  ggplot(aes(x=Force, y=resid)) + 
+  geom_point())
+```
+
+Si noti che il lieve pattern a "M" ancora presente potrebbe essere eliminato aumentando ancora il grado della regressione, aumentandolo fino a rimuovere qualsiasi sotto-adattamento.
+
+È però evidente che, quale che sia la regressione, la curva di taratura così definita è sbagliata. Supponiamo infatti di ripetere le stesse misure una seconda volta **però a temperatura costante e pari a 20°C**:
+
+
+```{r}
+data %>% 
+  mutate(run = "taratura", .before=t) %>% 
+  bind_rows(
+    tibble(
+      run="verifica",
+      t = seq(0, duration, length.out=N),
+      Temp = 20,
+      Gf = Gf(Temp),
+      Force = seq(0, 100, length.out=N),
+      Vn = model(Force, Temp, parameters),
+      V = Vn + rnorm(N, 0, 0.5)
+    )
+  ) %>% 
+  ggplot(aes(x=Force, y=V)) + 
+  geom_point(aes(color=run)) + 
+  geom_path(aes(y=pred), color="red")
+```
+
+Si osserva come dai 50 N in su la curva di taratura fornisce valori via via più lontani dal valore atteso.
+
+# Casualizzazione della sequenza operativa
+
+La **casualizzazione della sequenza operativa** serve a trasformare un ingresso modificante --- come quello della temperatura --- in un effetto interferente, che può essere trattato in maniera statistica.
+
+Supponiamo di effettuare lo stesso procedimento di taratura su un campione di forze note in ordine casuale, anziché in sequenza crescente. Per farlo modifichiamo la tabella di dati ricampionando la colonna `Force` e ricalcolando le colonne dipendenti `Vn`e `V`:
+
+
+```{r}
+set.seed(120)
+data <- data %>% 
+  mutate(
+    Force = sample(Force),
+    Vn = model(Force, Temp, parameters),
+    V = Vn + rnorm(N, 0, 0.5)
+  )
+
+
+data %>% 
+  ggplot(aes(x=Force, y=V)) + 
+  geom_point()
+```
+
+Si nota come la varianza delle osservazioni aumenta con il carico. Realizziamo una regressione di primo grado:
+
+```{r}
+data.lm <- lm(V ~ Force -1, data=data)
+summary(data.lm)
+```
+
+Osservando i residui **in funzione del tempo** si nota che dopo 4 ore i residui cominciano ad aumentare:
+
+```{r}
+data %>% 
+  add_residuals(data.lm) %>% 
+  ggplot(aes(x=t, y=resid)) +
+  geom_point()
+```
+
+Se coloriamo i punti per il tempo di acquisizione è evidente che limitandoci ai dati raccolti entro le 4 ore i punti sono molto più alineati:
+
+```{r}
+data %>% 
+  ggplot(aes(x=Force, y=V)) + 
+  geom_point(aes(color=t)) +
+  scale_color_viridis_b()
+```
+
+Quindi possiamo decidere di effettuare la regressione scartando tutti i dati raccolti dopo le 4 ore:
+
+```{r}
+data.f <- data %>% 
+  filter(t < 4)
+
+data.f.lm <- lm(V ~ Force, data=data.f)
+summary(data.f.lm)
+```
+
+```{r}
+data.f %>% 
+  add_predictions(data.f.lm) %>% 
+  ggplot(aes(x=Force, y=V)) + 
+  geom_point() + 
+  geom_line(aes(y=pred), color="red")
+
+data.f %>% 
+  add_residuals(data.f.lm) %>% 
+  ggplot(aes(x=Force, y=resid)) + 
+  geom_point()
+```
+
+**Esercizio**: ricavare la funzione che rappresenta l'inversa della caratteristica statica.
+
+Cioè: l'ordine di esecuzione casuale consente di evidenziare eventuali effetti modificanti e di eliminarli dalla regressione.
+
+
+# Metodo Monte Carlo
+
+```{r}
+N <- 10000
+p <- tibble(
+  x = runif(N),
+  y = runif(N),
+  inside = sqrt(x^2 + y^2) < 1
+) 
+
+p %>% 
+
+p %>% 
+  ggplot(aes(x=x, y=y, color=inside)) + 
+  geom_point() +
+  coord_equal()
+```
+```{r}
+set.seed(0)
+N <- 10000
+rbar <- 120
+ur <- 0.5
+lbar <- 450
+ul <- 0.5
+
+mmt <- list(
+  mean = lbar,
+  variance = ul^2,
+  skewness = 1,
+  kurtosis = 5
+)
+
+data <- tibble(
+  r = rnorm(N, rbar, ur),
+  l = rpearson(N, moments=mmt)
+)
+
+```
+
+Verifichiamo con istogrammi le due distribuzioni:
+
+```{r}
+data %>% 
+  ggplot(aes(x=r)) +
+  geom_histogram(binwidth=ur/5, fill=gray(0.5), color="black")
+
+data %>% 
+  ggplot(aes(x=l)) +
+  geom_histogram(binwidth=ul/5, fill=gray(0.5), color="black")
+
+
+```
+** Esercizio:** aggiungere media e media +- deviazione standard come linee verticali
+
+
+Studiamo la distribuzione del volume:
+
+```{r}
+data <- data %>% 
+  mutate(V = pi * r^2 * l / 1e6)
+
+Vbar <- mean(data$V)
+uV <- sd(data$V)
+
+Vbar
+uV
+```
+
+```{r}
+data %>% 
+  ggplot(aes(x=V)) + 
+  geom_histogram(binwidth=uV/5, fill=gray(0.5), color="black")
+```
+
