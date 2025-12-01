@@ -1,0 +1,504 @@
+---
+title: "Esercizi finali"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(adas.utils)
+```
+
+# Libreria `purrr`
+
+Le funzioni della libreria `purrr` servono a sostituire un ciclo (`for` o `while`) in una chiamata a funzione. I vantaggi sono:
+
+* spesso la funzione è più veloce
+* la funzione può essere usata laddove ho bisogno di un'**operazione vettorializzata** su una colonna di una tabella, come ad esempio in `summarise()` o in `mutate()`.
+
+Le funzioni più comuni sono della famiglia `map`:
+
+* `map()` opera su una lista o su un vettore e **restituisce sempre una lista**
+* `map_<tipo>()` operano su una lista o un vettore e **restutuiscono un vettore di tipo `<tipo>`**
+
+Se serve una funzione che lavora su 2 vettori della stessa lunghezza, usare le funzioni `map2*`; se serve operare su più vettori, usare `pmap*`.
+
+
+```{r}
+starwars %>% 
+  select(name:mass) %>% 
+  mutate(
+    body = map2_chr(height, mass, function(h, m) paste(h, "cm,", m, "kg")),
+    .after = name
+  ) %>% slice_head(n=1)
+```
+
+
+```{r}
+# più in breve:
+starwars %>% 
+  select(name:mass) %>% 
+  mutate(
+    body = map2_chr(height, mass, \(h, m) paste(h, "cm,", m, "kg")),
+    .after = name
+  ) %>% slice_head(n=1)
+
+# ancora più in breve:
+starwars %>% 
+  select(name:mass) %>% 
+  mutate(
+    body = map2_chr(height, mass, ~ paste(.x, "cm,", .y, "kg")),
+    .after = name
+  ) %>% slice_head(n=1)
+```
+
+Però gran parte delle funzioni (`paste()` inclusa) sono già vettorializzate:
+
+```{r}
+starwars %>%
+  select(name:mass) %>% 
+  mutate(
+    body = paste(height, "cm,", mass, "kg"),
+    .after = name
+  ) %>% slice_head(n=1)
+```
+
+Vediamo un caso in cui è veramente utile: quando una struttura dati è complicata, come ad esempio la colonna `films` di `starwars`, che contiene liste di stringhe. 
+
+Supponiamo di voler contare il numero di film in cui compare ciascun personaggio:
+
+```{r}
+starwars %>% 
+  select(name, films) %>% 
+  mutate(films = length(films)) %>% 
+  slice_head(n=5)
+```
+
+Come si vede, il risultato è sbagliato, perché restituisce la dimensione della colonna films, cioè il suo numero di righe. Risolviamo il problema con `purrr`:
+
+```{r}
+starwars %>% 
+  select(name, films) %>% 
+  mutate(
+    n_films = map_int(films, ~ length(.))
+  ) %>% 
+  slice_head(n=5)
+```
+
+Oppure usando semplicemente `rowwise()` e ricordandosi poi di disattivare il raggruppamento per righe:
+
+```{r}
+starwars %>% 
+  select(name, films) %>% 
+  rowwise() %>% 
+  mutate(
+    n_films = length(films)
+  ) %>% 
+  ungroup() %>% 
+  slice_head(n=5)
+```
+
+
+Se invece volessimo creare una colonna con un'unica sequenza di film in una stringa sola, dobbiamo iterare due volte:
+
+1. iteriamo sui film con `map_chr` (perché vogliamo ottenere una stringa)
+2. all'interno di `map_chr`, da ogni lista di film dobbiamo ottenere una sola stringa. Questo si può ottenere con la funzione `reduce()`, che *riduce* una lista ad un unico valore, accumulandone gli elementi.
+
+La funzione `reduce()` opera su una lista; passa ogni elemento della lista ad una funzione anonima con due argomenti: il primo argomento è un accumulatore, il secondo è l'*i*-esimo elemento della lista. Alla fine dell'iterazione viene restituito l'accumulatore.
+
+```{r}
+starwars %>% 
+  select(name, films) %>% 
+  mutate(
+    films_n = map_int(films, \(f) length(f)),
+    films = map_chr(films, \(f) reduce(f, \(accum, value) paste0(accum, "; ", value)))
+    #       ↑                   ↑
+    #       |                   |_ Loop interno: accumula gli elementi della lista
+    #       |_____________________ Loop esterno: esegue l'accumulazione su ogni riga
+  ) %>% 
+  arrange(desc(films_n)) %>% 
+  relocate(films_n, .after=name) %>% 
+  slice_head(n=5)
+```
+
+Usando le funzioni abbreviate di `purrr`:
+
+```{r}
+starwars %>% 
+  select(name, films) %>% 
+  mutate(
+    films_n = map_int(films, ~ length(.)),
+    films = map_chr(films, ~ reduce(., ~ paste0(.x, "; ", .y)))
+  ) %>% 
+  arrange(desc(films_n)) %>% 
+  relocate(films_n, .after=name) %>% 
+  slice_head(n=5)
+```
+
+Usando `rowwise()`:
+
+```{r}
+starwars %>% 
+  select(name, films) %>% 
+  rowwise() %>% 
+  mutate(
+    films_n = length(films),
+    films = reduce(films, ~ paste0(.x, "; ", .y))
+  ) %>% 
+  ungroup() %>% 
+  arrange(desc(films_n)) %>% 
+  relocate(films_n, .after=name) %>% 
+  slice_head(n=5)
+```
+
+# Dati 1-D
+
+## Funzioni
+
+Una funzione R può implementare una relazione matematica tra ingressi e uscite come pure una sequenza di operazioni complesse, un algoritmo.
+
+```{r}
+y <- function(x) sin(x)/sqrt(x)
+```
+
+Per mettere in grafico una funzione o creiamo un data frame di supporto o usiamo `geom_function()`:
+
+```{r}
+p1 <- tibble(
+  x = seq(0, 20*pi, 0.1),
+  y = y(x)
+) %>% 
+  slice_tail(n=-1) %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_line() +
+  labs(x="x", y="y(x)")
+
+p1
+```
+
+```{r}
+p1 +
+  geom_function(fun = ~ 1/sqrt(.), color="red") + 
+  geom_function(fun = ~ -1/sqrt(.), color="red") +
+  ylim(c(-1,1))
+```
+
+Si noti che `ylim()` **rimuove** dal grafico i punti che stanno fuori dall'intervallo specificato, di conseguenza i grafici in rosso si interrompono e ottengo due warning.
+
+Per ottenere l'effetto di *zoomare* nel grafico, senza rimuovere punti, si può usare `coord_cartesian()` specificando i limiti:
+
+```{r}
+p1 +
+  geom_function(fun = ~ 1/sqrt(.), color="red") + 
+  geom_function(fun = ~ -1/sqrt(.), color="red") +
+  coord_cartesian(ylim=c(-1,1), xlim=c(0,10*pi))
+```
+
+Ovviamente una funzione può essere messa in grafico anche direttamente, senza altre serie di appoggio. In questo caso, però, è opportuno specificare manualmente l'intervallo $x$ su cui valutare la funzione:
+
+```{r}
+ggplot() + geom_function(fun = y, xlim=c(0, 20*pi))
+```
+
+Il messaggio di warning è dovuto al fatto che l'intervallo di valutazione include lo 0, e in 0 la funzione vale $0/0$, cioè `NaN`.
+
+Se la funzione risulta *spigolosa* è perché è valutata su un set troppo piccolo di punti (default: 101). In questo caso si può forzare la valutazione su un set più ampio con il parametro `n`:
+
+```{r}
+ggplot() + geom_function(fun = y, xlim=c(0, 20*pi), n=500)
+```
+Se la funzione ha più di un argomento possiamo procedere in due modi:
+
+* usando una funzione anonima di appoggio che ammanta la funzione desiderata
+* usando il parametro `args` con una lista degli argomenti aggiuntivi
+
+```{r}
+ggplot() + 
+  geom_function(fun = ~ dnorm(., mean=1, sd=0.75), xlim=c(-3,3))
+```
+```{r}
+ggplot() + 
+  geom_function(fun = dnorm, args=list(mean=1, sd=0.75), xlim=c(-3,3))
+```
+
+Nel caso di più funzioni posso usare estetiche come `color` o `linetype` per distinguerle:
+
+```{r}
+ggplot() + 
+  geom_function(aes(color="Normale"), fun = dnorm, xlim=c(-3,3)) + 
+  geom_function(aes(color="T"), fun = dt, args=list(df=5), xlim=c(-3,3)) + 
+  labs(color="Distribuzione")
+```
+
+## Serie multiple
+
+Le serie multiple possono essere messe in grafico o come colonne separate o come dati tidy e assegnate a estetiche separate:
+
+```{r}
+data <- tibble(
+  x = seq(0, 5*pi, length.out = 100),
+  y1 = sin(x),
+  y2 = cos(x)
+)
+```
+
+Colonne separate:
+
+```{r}
+data %>% 
+  ggplot(aes(x=x)) +
+  geom_line(aes(y=y1, color="sin")) + 
+  geom_line(aes(y=y2, color="cos"))
+```
+
+Meglio, come dati *tidy*:
+
+```{r}
+data %>% 
+  pivot_longer(-x, names_to = "Funzione", values_to = "y") %>% 
+  ggplot(aes(x=x, y=y, color=Funzione)) + 
+  geom_line() + 
+  geom_point()
+```
+
+Quest'ultimo modo è particolarmente comodo quando le serie sono numerose.
+
+## `geom_line` o `geom_path`?
+
+`geom_line()` serve per mettere in grafico relazioni **iniettive** tra variabili dipendenti e indipendenti. Il vettore in ascissa viene sempre ordinato prima del grafico:
+
+
+```{r}
+set.seed(0)
+data <- tibble(
+  x = seq(0, 10, length.out = 100),
+  y = 2 + 0.1*x^2 + rnorm(length(x), 0, 1)
+)
+
+data %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_line()
+```
+
+Se i dati sono in ordine sparso nulla cambia, perché `geom_line()` riordina l'ascissa automaticamente:
+
+```{r}
+data %>%
+  slice_sample(n=length(data$x)) %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_line()
+```
+
+Invece, `geom_path()` disegna un **percorso**, collegando i punti nell'ordine in cui sono riportati nel data frame:
+
+
+```{r}
+data %>%
+  slice_sample(n=length(data$x)) %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_path()
+```
+
+Se la funzione non è iniettiva, ad esempio perché è l'equazione parametrica di una conica, `geom_line()` non è adatta:
+
+```{r}
+data <- tibble(
+  t = seq(0, 2*pi, length.out = 100),
+  x = sin(t),
+  y = cos(t)
+)
+
+circle <- data %>% 
+  ggplot(aes(x=x, y=y, color=t)) + 
+  coord_equal() + 
+  scale_color_viridis_c()
+
+circle + geom_line() + geom_point()
+```
+
+Mentre `geom_path()` produce il risultato atteso:
+
+```{r}
+circle + geom_path()
+```
+
+Ovviamente, se i dati non sono in ordine anche `geom_path()` produce un risultato inatteso, proprio perché collega i punti nell'ordine in cui compaiono:
+
+```{r}
+data %>% 
+  slice_sample(n=length(data$t)) %>% 
+  ggplot(aes(x=x, y=y, color=t)) + 
+  geom_path() +
+  coord_equal() + 
+  scale_color_viridis_c()
+```
+
+## Polinomi
+
+Valutiamo la differenza tra regressioni con polinomi ortogonali o polinomi raw. Costruiamo un set di dati. Costruiamo un set di dati valutando un polinomio di grado elevato:
+
+```{r}
+library(polynom)
+set.seed(0)
+coefs <- c(1, 0.5, -0.2, 0.01, 0, -0.00003)
+p <- polynomial(coefs)
+
+data <- tibble(
+  x = seq(-5, 15, length.out=20),
+  y = predict(p, x) + rnorm(length(x), 0, 0.5)
+)
+
+ggplot(data, aes(x=x, y=y)) + geom_point()
+
+```
+
+Costruiamo due liste di modelli lineari con polinomi di grado crescente, da 1 a 7:
+
+```{r}
+models <- 1:7 %>% map(~ lm(y~poly(x, ., raw=T), data=data))
+models_ort <- 1:7 %>% map(~ lm(y~poly(x, .), data=data))
+```
+
+Possiamo usare `purrr::walk()` per mostrare i sommari di tutti i modelli, uno alla volta. `walk()` esegue un'operazione su una lista, un elemento alla volta, quando non interessa il risultato finale (a differenza di `map()`):
+
+```{r}
+models %>% walk(~ summary(.) %>% coef() %>% print())
+models_ort %>% walk(~ summary(.) %>% coef() %>% print())
+```
+
+
+Volendo riassumere tutti i coefficienti in un'unica tabella dobbiamo anzitutto trasformare un modello in una tabella. Possiamo usare `broom::tidy()` per convertire un modello lineare in una tabella di coefficienti; per ogni modello estraiamo anche il suo *rango*, cioè il numero di coefficienti:
+
+```{r}
+models[[1]] %>% broom::tidy() %>% 
+  mutate(rank = models[[1]]$rank, .before=term)
+```
+
+Ora possiamo applicare questa tecnica a tutti gli elementi delle liste di modelli, accodandoli in un'unica tabella inizialmente vuota (`.init = tibble()`):
+
+```{r}
+models %>% reduce(
+  .init = tibble(),
+  \(acc, e) bind_rows(acc, broom::tidy(e) %>% mutate(rank=e$rank, .before=term))
+) %>% 
+  group_by(rank) %>% 
+  mutate(deg = (1:n())-1, .after=rank) %>% 
+  ungroup() %>% 
+  select(rank, deg, estimate) %>% 
+  pivot_wider(names_from = deg, values_from = estimate)
+```
+
+Ugualmente, per i modelli basati su polinomi ortogonali:
+
+```{r}
+models_ort %>% reduce(
+  .init = tibble(),
+  \(acc, e) bind_rows(acc, broom::tidy(e) %>% mutate(rank=e$rank, .before=term))
+) %>% 
+  group_by(rank) %>% 
+  mutate(deg = (1:n())-1, .after=rank) %>% 
+  ungroup() %>% 
+  select(rank, deg, estimate) %>% 
+  pivot_wider(names_from = deg, values_from = estimate)
+```
+
+Usiamo gli stessi trucchi per mettere in grafico le regressioni:
+
+```{r}
+models %>% reduce(
+  .init = data,
+  \(acc, e) add_predictions(acc, e, var=paste("rank", e$rank))
+) %>% 
+  pivot_longer(-c(x,y), names_to = "rank", values_to = "pred") %>% 
+  ggplot(aes(x=x)) + 
+  geom_line(aes(y=pred, color=rank)) + 
+  geom_point(aes(y=y))
+```
+```{r}
+models_ort %>% reduce(
+  .init = data,
+  \(acc, e) add_predictions(acc, e, var=paste("rank", e$rank))
+) %>% 
+  pivot_longer(-c(x,y), names_to = "rank", values_to = "pred") %>% 
+  ggplot(aes(x=x)) + 
+  geom_line(aes(y=pred, color=rank)) + 
+  geom_point(aes(y=y))
+```
+
+In un grafico unico con `facet_wrap()`:
+
+```{r}
+models %>% reduce(
+  \(acc, e) add_predictions(acc, e, var=paste("rank", e$rank)),
+  .init = data
+) %>% 
+  pivot_longer(-c(x, y), names_to = "rank", values_to = "pred") %>% 
+  mutate(type="raw") %>% 
+  bind_rows(
+    models %>% reduce(
+      \(acc, e) add_predictions(acc, e, var=paste("rank", e$rank)),
+      .init = data
+    ) %>% 
+      pivot_longer(-c(x, y), names_to = "rank", values_to = "pred") %>% 
+      mutate(type="orthogonal")
+  ) %>% 
+  ggplot(aes(x=x)) + 
+  geom_line(aes(y=pred, color=rank)) + 
+  geom_point(aes(y=y)) + 
+  facet_wrap(~type, nrow=2)
+```
+
+Come si vede, usando `add_predictions()` (o `predict()`) sui modelli basati su polinomi ortogonali si compensa automaticamente le differenze nei coefficienti.
+
+Ma se usiamo direttamente i coefficienti dei polinomi ortogonali?
+
+```{r}
+tibble(
+  x = data$x,
+  y1 = polynomial(coef(models[[3]])) %>% predict(x),
+  y2 = polynomial(coef(models_ort[[3]])) %>% predict(x)
+) %>% 
+  pivot_longer(-x) %>% 
+  ggplot(aes(x=x, y=value)) + 
+  geom_line() + 
+  facet_wrap(~name, scales="free_y")
+```
+
+Ovviamente, avendo coefficienti diversi i polinomi **sono** diversi.
+
+Confrontiamo i p-value per i vari termini, per le due serie di modelli:
+
+```{r}
+models_p.val <- function(model) {
+  models %>% 
+    reduce(
+      .init = tibble(), 
+      \(acc, e) bind_rows(
+        acc,
+        broom::tidy(e) %>%
+          mutate(rank = e$rank) %>%
+          select(rank, term, p.value)
+      )
+    ) %>% 
+    group_by(rank) %>% 
+    mutate(term = (1:n())-1) %>% 
+    ungroup()
+}
+
+models.p <- models_p.val(models)
+models_ort.p <- models_p.val(models_ort)
+
+models.p %>% 
+  left_join(models_ort.p, by=join_by(rank, term), suffix=c(" raw", " ort"))
+```
+
+Cioè, i p-value dei modelli basati su polinomi ortogonali è in genere più basso.
+
+Quindi:
+
+* un modello con polinomio ortogonale è più robusto, soprattutto per gradi elevati
+* è più facile osservare i contributi dei singoli termini nei coefficienti ortogonali, dato che aumentando il grado, i coefficienti di grado inferiore rimangono invariati
+* una volta semplificato il modello rimuovendo termini non significativi, si può creare un secondo modello dello stesso grado e con gli stessi termini usando un polinomio raw, ottenendo coefficienti direttamente utilizzabili.
+* in ogni caso, se si usa `predict()` o `add_predictions()` per valutare il polinomio, il risultato è corretto indipendentemente dal tipo di polinomio usato per la regressione
