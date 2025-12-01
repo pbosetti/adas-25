@@ -471,6 +471,8 @@ Ovviamente, avendo coefficienti diversi i polinomi **sono** diversi.
 Confrontiamo i p-value per i vari termini, per le due serie di modelli:
 
 ```{r}
+# costruiamo una funzione che da una lista di modelli estrae una tabella con 
+# rango, termine e p.value
 models_p.val <- function(model) {
   models %>% 
     reduce(
@@ -487,9 +489,11 @@ models_p.val <- function(model) {
     ungroup()
 }
 
+# Usiamo la funzione sulle due liste di modelli
 models.p <- models_p.val(models)
 models_ort.p <- models_p.val(models_ort)
 
+# Uniamo i risultati
 models.p %>% 
   left_join(models_ort.p, by=join_by(rank, term), suffix=c(" raw", " ort"))
 ```
