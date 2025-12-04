@@ -153,7 +153,7 @@ starwars %>%
   slice_head(n=5)
 ```
 
-# Dati 1-D
+# Dati 1-D (monovariati)
 
 ## Funzioni
 
@@ -506,3 +506,91 @@ Quindi:
 * è più facile osservare i contributi dei singoli termini nei coefficienti ortogonali, dato che aumentando il grado, i coefficienti di grado inferiore rimangono invariati
 * una volta semplificato il modello rimuovendo termini non significativi, si può creare un secondo modello dello stesso grado e con gli stessi termini usando un polinomio raw, ottenendo coefficienti direttamente utilizzabili.
 * in ogni caso, se si usa `predict()` o `add_predictions()` per valutare il polinomio, il risultato è corretto indipendentemente dal tipo di polinomio usato per la regressione
+
+
+
+## Predizione e Intervalli di confidenza
+
+Consideriamo solo il modello con polinomio di grado 5
+
+```{r}
+data.lm <- models[[5]]
+```
+
+Ogni oggetto modello (lineare o meno) contiene i residui, e i coefficienti:
+
+```{r}
+data.lm %>% residuals()
+data.lm %>% coefficients()
+```
+
+Si noti che i coefficienti possono essere ottenuti con le due funzioni **identiche** `coef()` e `coefficients()`. Inoltre, in alternativa alle funzioni si può accedere direttamente ai **campi** dell'oggetto (la differenza è solo una questione di preferenza):
+
+```{r}
+data.lm$residuals
+data.lm$coefficients
+```
+
+Solo se il modello è lineare è possibile calcolare la banda di confidenza e la banda di predizione con le funzioni `predict()` o con `adas.utils::add_predictions()`.
+
+La funzione `predict()` può essere usata principalmente in **tre modi**:
+
+1. sugli stessi predittori usati per la regressione. In questo caso ottiene il **vettore di predizioni** $\hat y_i = y_i - \varepsilon_i$:
+```{r}
+data.lm %>% predict() %>% str()
+```
+2. Su una nuova lista di predittori, passata come data frame all'argomento `newdata`, ottenendo il **vettore di predizioni**:
+```{r}
+data_new <-  tibble(
+  x=runif(30, min=min(data$x), max=max(data$x))
+) %>% arrange(x)
+data.lm %>% predict(newdata = data_new) %>% str()
+```
+3. Chiedendo anche una banda di predizione o di confidenza. In questo caso si ottiene **una matrice** con tre colonne nominate: la predizione e gli estremi della banda (è possibile specificare `newdata` se si desidera la predizione e la banda su predittori diversi):
+```{r}
+data.lm %>% predict(interval="confidence", level=0.99) %>% head()
+```
+
+In genere si desidera aggiungere le predizioni e eventualmente la banda ad un data frame già esistente. Per questo motivo è più comodo utilizzare `adas.utils::add_predictions()`, che di fatto internamente usa `predict()`:
+
+```{r}
+data %>% 
+  add_predictions(data.lm) %>% 
+  head()
+```
+
+```{r}
+data %>% 
+  add_predictions(data.lm, interval="confidence", level=0.99) %>% 
+  head()
+```
+
+**ATTENZIONE**: solo la versione `add_predictions()` in `adas.utils` supporta l'aggiunta della banda di predizione e di confidenza; la versione originale in `modelr`, invece, consente di aggiungere al data frame solo la colonna di predizioni. 
+
+Ovviamente, è possibile aggiungere le predizioni e le bande anche ad un data frame contenente un diverso vettore di predittori (purché la colonna abbia lo stesso nome, in questo caso `x`):
+
+```{r}
+data_new %>% 
+  add_predictions(data.lm) %>% 
+  head()
+```
+
+Le bande di confidenza o di predizione si plottano con la geometria `geom_band()`:
+
+```{r}
+data %>% 
+  add_predictions(data.lm, interval="conf", level=0.99) %>% 
+  rename_with(.cols=fit:upr, .fn=~paste0("conf.", .)) %>% 
+  add_predictions(data.lm, interval="pred", level=0.99) %>% 
+  rename_with(.cols=fit:upr, .fn=~paste0("pred.", .)) %>% 
+  ggplot(aes(x=x)) + 
+  geom_ribbon(aes(ymin=conf.lwr, ymax=conf.upr, color="confidence"), alpha=1/3) +
+  geom_ribbon(aes(ymin=pred.lwr, ymax=pred.upr, color="prediction"), fill=NA) +
+  geom_line(aes(y=conf.fit)) + 
+  geom_point(aes(y=y)) + 
+  labs(y="y", color="Intervallo")
+```
+
+
+# Dati multivariati
+
