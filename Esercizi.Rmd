@@ -592,5 +592,82 @@ data %>%
 ```
 
 
+
 # Dati multivariati
 
+## Iris
+
+La variabile `iris3` contiene una **matrice** in dimensione 3 che riporta alcune dimensioni caratteristiche di tre specie di fiori di iris, una specie per pagina.
+
+1. trasformare la matrice in un data frame tidy, con le specie in una colonna dedicata (come stringhe)
+2. identificare su un grafico se esistono pattern
+3. costruire un modello di regressione logistica per distinguere le due specie più simili
+
+Creazione della tabella: uso `reduce` per accodare una pagina alla volta ad una tibble:
+
+```{r}
+data <- dimnames(iris3)[[3]] %>% 
+  reduce(
+    \(acc, species) {
+      as_tibble(iris3[,,species]) %>% 
+        mutate(Species=species) %>% 
+        bind_rows(acc)
+      }, 
+    .init=tibble()
+  ) %>% 
+  arrange(Species) %>% 
+  rename_with(.cols=-Species, ~c("SL", "SW", "PL", "PW")) %>% 
+  mutate(Species=as.factor(Species)) 
+
+```
+
+Osservo i dati in un grafico:
+
+```{r}
+data %>% ggplot(aes(x=PW, y=PL)) +
+  geom_point(aes(color=Species))
+data %>% ggplot(aes(x=SW, y=SL)) +
+  geom_point(aes(color=Species))
+```
+
+Lunghezza e larghezza dei petali sono dei descrittori più potenti. Inoltre, la specie Setosa è più facile da individuare, quindi costruisco un modello logistico sulle specie Virginica e Versicolor:
+
+```{r}
+data <- data %>% 
+  filter(Species != "Setosa")
+data.glm <- data %>% 
+  glm(Species~PL+PW, family=binomial, data=.)
+data.glm %>% summary()
+```
+
+Aggiungo le predizioni e una colonna che identifica le predizioni errate:
+
+```{r}
+data <- data %>% 
+  add_predictions(data.glm, type="response") %>% 
+  mutate(
+    Virginica = pred > 0.5,
+    correct = (Species=="Virginica") == Virginica
+  )
+
+data
+```
+
+Mi creo una griglia sul piano `PL`-`PW` e la popolo con le predizioni:
+
+```{r}
+grd <- expand.grid(
+  PW = seq(min(data$PW), max(data$PW), length.out = 100),
+  PL = seq(min(data$PL), max(data$PL), length.out = 100)
+) %>% 
+  add_predictions(data.glm, type="response")
+```
+
+Creo il grafico:
+
+```{r}
+grd %>% 
+  ggplot(aes(x=PL, y=PW, z=pred)) + 
+  geom_contour_filled() + 
+  geom_point(data=data, mapping = aes(x=PL, y=PW, color=Species, shape=correct))
+```
