@@ -9,6 +9,7 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(adas.utils)
+library(broom)
 ```
 
 # Libreria `purrr`
@@ -671,3 +672,154 @@ grd %>%
   geom_contour_filled() + 
   geom_point(data=data, mapping = aes(x=PL, y=PW, color=Species, shape=correct))
 ```
+
+
+
+
+## Regressione non lineare
+
+Generiamo dei dati secondo $z=ax^b + cx/y^d$:
+
+```{r}
+f <- function(x, y, par) par$a * x^par$b + par$c*x/y^par$d
+pars = list(a=13, b=0.15, c=1.8, d=1/2)
+
+data <- expand.grid(
+  x=seq(10, 50, length.out = 20),
+  y=seq(10, 50, length.out = 20)
+) %>% 
+  mutate(z = f(x, y, pars) + rnorm(n(), 0, 0.8)) 
+
+data %>% 
+  ggplot(aes(x=x, y=y, z=z)) + 
+  geom_contour_filled()
+```
+
+Regrediamo la `f`:
+
+```{r}
+fit <- nls(
+  z~f(x, y, list(a=a, b=b, c=c, d=d)), 
+  data=data, 
+  start = list(a=1, b=1, c=1, d=1), 
+  trace=T, 
+  control=list(tol=1e-8))
+coef(fit)
+fit %>% tidy()
+```
+
+Ora vogliamo calcolare gli intervalli di confidenza tramite bootstrap. Per prima cosa dobbiamo definirci la funzione di appoggio che calcola la statistica (cioè il vettore dei 4 coefficienti) a partire dal data frame dei dati:
+
+```{r}
+reg <- function(data) {
+  nls(
+    z~f(x, y, list(a=a, b=b, c=c, d=d)), 
+    data=data, 
+    start = list(a=1, b=1, c=1, d=1))
+}
+```
+
+Possiamo procedere al bootstrap. Si noti che in alcuni casi la funzione `reg()` può fallire. Dobbiamo quindi catturare questi errori e restitire, come default, la regressione calcolata sul set di dati originale:
+
+```{r}
+library(boot)
+data.b <- boot(
+  data = data,
+  statistic = \(d, i) {
+    tryCatch(reg(data[i,]), error = \(e) reg(data)) %>% coef()
+  },
+  R = 10000,
+  parallel = "multicore", # su Windows, usare "snow"
+  ncpus = 8
+)
+data.b
+```
+
+Calcoliamo gli intervalli di confidenza e mettiamoli in tabella:
+
+```{r}
+1:4 %>% reduce(\(acc, n) {
+  ci <- boot.ci(data.b, type="perc", index = n)$percent[4:5]
+  bind_rows(acc, tibble(lwr = ci[1], upr=ci[2]))
+  }, .init=tibble()) %>% 
+  mutate(
+    nom = as.numeric(pars), 
+    fit=data.b$t0, 
+    .before=lwr
+  )
+```
+
+Con la libreria `rsample`:
+
+```{r}
+library(rsample)
+set.seed(0)
+data.rs <- bootstraps(data, times = 10000) %>% 
+  mutate(results = map(splits, ~ tryCatch(reg(analysis(.)), error = \(e) reg(data)) |> broom::tidy()))
+data.rs %>% 
+  int_pctl(results)
+```
+
+
+## Piano fattoriale
+
+Creiamo un piano fattoriale 3^2 aumentato in centro, assumendo che il fattore `C` sia **qualitativo**:
+
+```{r}
+fp <- fp_design_matrix(3) %>% 
+  fp_add_scale(
+    A = c(30, 70),
+    B = c(150, 300)
+  ) %>% 
+  fp_augment_center(rep=6)
+```
+
+Definiamo una funzione per calcolare la resa:
+
+```{r}
+f <- function(a, b, c) {
+  if (! c %in% c(-1,1)) stop("c must be either -1 or 1")
+  ifelse(
+    c == -1,
+    10 + 2*a + 3*b - 0.3*a*b + 2*b^2,
+    12 + 2.5*a + 6*b - 2*a*b
+  ) + rnorm(1, 0, 0.7)
+}
+```
+
+Riportiamo i punti centrali a -1 o +1 in `C` e aggiungiamo la resa:
+
+```{r}
+set.seed(1)
+fp <- fp %>% 
+  mutate(C=ifelse(.treat=="center", ifelse(.rep %% 2 == 1, -1, 1), C)) %>% 
+  rowwise() %>% 
+  mutate(Y = f(A, B, C) %>% round(2)) %>% 
+  ungroup()
+
+fp
+```
+
+Modello e Daniel plot:
+
+```{r}
+fp.lm <- lm(Y~A*B*C*I(A^2), data = fp)
+daniel_plot_hn(fp.lm, nlab=6)
+```
+
+
+```{r}
+fp.lm <- lm(Y~A*B + B*C + A:B:C, data=fp)
+```
+
+
+```{r}
+fp %>% 
+  add_predictions(fp.lm) %>% 
+  mutate(across(A:C, ~factor(.))) %>% 
+  ggplot(aes(x=A)) + 
+  geom_line(aes(y=pred, group=B, color=B)) +
+  geom_point(aes(y=Y, color=B)) + 
+  facet_wrap(~C, labeller=label_both)
+```
+
