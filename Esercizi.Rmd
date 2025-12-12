@@ -15,16 +15,15 @@ library(adas.utils)
 
 Le funzioni della libreria `purrr` servono a sostituire un ciclo (`for` o `while`) in una chiamata a funzione. I vantaggi sono:
 
-* spesso la funzione è più veloce
-* la funzione può essere usata laddove ho bisogno di un'**operazione vettorializzata** su una colonna di una tabella, come ad esempio in `summarise()` o in `mutate()`.
+-   spesso la funzione è più veloce
+-   la funzione può essere usata laddove ho bisogno di un'**operazione vettorializzata** su una colonna di una tabella, come ad esempio in `summarise()` o in `mutate()`.
 
 Le funzioni più comuni sono della famiglia `map`:
 
-* `map()` opera su una lista o su un vettore e **restituisce sempre una lista**
-* `map_<tipo>()` operano su una lista o un vettore e **restutuiscono un vettore di tipo `<tipo>`**
+-   `map()` opera su una lista o su un vettore e **restituisce sempre una lista**
+-   `map_<tipo>()` operano su una lista o un vettore e **restutuiscono un vettore di tipo `<tipo>`**
 
 Se serve una funzione che lavora su 2 vettori della stessa lunghezza, usare le funzioni `map2*`; se serve operare su più vettori, usare `pmap*`.
-
 
 ```{r}
 starwars %>% 
@@ -34,7 +33,6 @@ starwars %>%
     .after = name
   ) %>% slice_head(n=1)
 ```
-
 
 ```{r}
 # più in breve:
@@ -65,7 +63,9 @@ starwars %>%
   ) %>% slice_head(n=1)
 ```
 
-Vediamo un caso in cui è veramente utile: quando una struttura dati è complicata, come ad esempio la colonna `films` di `starwars`, che contiene liste di stringhe. 
+Vediamo un caso in cui è veramente utile: quando una struttura dati è complicata
+, come ad esempio la colonna `films` di `starwars`, che contiene liste di 
+stringhe.
 
 Supponiamo di voler contare il numero di film in cui compare ciascun personaggio:
 
@@ -100,11 +100,10 @@ starwars %>%
   slice_head(n=5)
 ```
 
-
 Se invece volessimo creare una colonna con un'unica sequenza di film in una stringa sola, dobbiamo iterare due volte:
 
-1. iteriamo sui film con `map_chr` (perché vogliamo ottenere una stringa)
-2. all'interno di `map_chr`, da ogni lista di film dobbiamo ottenere una sola stringa. Questo si può ottenere con la funzione `reduce()`, che *riduce* una lista ad un unico valore, accumulandone gli elementi.
+1.  iteriamo sui film con `map_chr` (perché vogliamo ottenere una stringa)
+2.  all'interno di `map_chr`, da ogni lista di film dobbiamo ottenere una sola stringa. Questo si può ottenere con la funzione `reduce()`, che *riduce* una lista ad un unico valore, accumulandone gli elementi.
 
 La funzione `reduce()` opera su una lista; passa ogni elemento della lista ad una funzione anonima con due argomenti: il primo argomento è un accumulatore, il secondo è l'*i*-esimo elemento della lista. Alla fine dell'iterazione viene restituito l'accumulatore.
 
@@ -209,15 +208,17 @@ Se la funzione risulta *spigolosa* è perché è valutata su un set troppo picco
 ```{r}
 ggplot() + geom_function(fun = y, xlim=c(0, 20*pi), n=500)
 ```
+
 Se la funzione ha più di un argomento possiamo procedere in due modi:
 
-* usando una funzione anonima di appoggio che ammanta la funzione desiderata
-* usando il parametro `args` con una lista degli argomenti aggiuntivi
+-   usando una funzione anonima di appoggio che ammanta la funzione desiderata
+-   usando il parametro `args` con una lista degli argomenti aggiuntivi
 
 ```{r}
 ggplot() + 
   geom_function(fun = ~ dnorm(., mean=1, sd=0.75), xlim=c(-3,3))
 ```
+
 ```{r}
 ggplot() + 
   geom_function(fun = dnorm, args=list(mean=1, sd=0.75), xlim=c(-3,3))
@@ -269,7 +270,6 @@ Quest'ultimo modo è particolarmente comodo quando le serie sono numerose.
 
 `geom_line()` serve per mettere in grafico relazioni **iniettive** tra variabili dipendenti e indipendenti. Il vettore in ascissa viene sempre ordinato prima del grafico:
 
-
 ```{r}
 set.seed(0)
 data <- tibble(
@@ -292,7 +292,6 @@ data %>%
 ```
 
 Invece, `geom_path()` disegna un **percorso**, collegando i punti nell'ordine in cui sono riportati nel data frame:
-
 
 ```{r}
 data %>%
@@ -368,7 +367,6 @@ models %>% walk(~ summary(.) %>% coef() %>% print())
 models_ort %>% walk(~ summary(.) %>% coef() %>% print())
 ```
 
-
 Volendo riassumere tutti i coefficienti in un'unica tabella dobbiamo anzitutto trasformare un modello in una tabella. Possiamo usare `broom::tidy()` per convertire un modello lineare in una tabella di coefficienti; per ogni modello estraiamo anche il suo *rango*, cioè il numero di coefficienti:
 
 ```{r}
@@ -416,6 +414,7 @@ models %>% reduce(
   geom_line(aes(y=pred, color=rank)) + 
   geom_point(aes(y=y))
 ```
+
 ```{r}
 models_ort %>% reduce(
   .init = data,
@@ -502,7 +501,283 @@ Cioè, i p-value dei modelli basati su polinomi ortogonali è in genere più bas
 
 Quindi:
 
-* un modello con polinomio ortogonale è più robusto, soprattutto per gradi elevati
-* è più facile osservare i contributi dei singoli termini nei coefficienti ortogonali, dato che aumentando il grado, i coefficienti di grado inferiore rimangono invariati
-* una volta semplificato il modello rimuovendo termini non significativi, si può creare un secondo modello dello stesso grado e con gli stessi termini usando un polinomio raw, ottenendo coefficienti direttamente utilizzabili.
-* in ogni caso, se si usa `predict()` o `add_predictions()` per valutare il polinomio, il risultato è corretto indipendentemente dal tipo di polinomio usato per la regressione
+-   un modello con polinomio ortogonale è più robusto, soprattutto per gradi elevati
+-   è più facile osservare i contributi dei singoli termini nei coefficienti ortogonali, dato che aumentando il grado, i coefficienti di grado inferiore rimangono invariati
+-   una volta semplificato il modello rimuovendo termini non significativi, si può creare un secondo modello dello stesso grado e con gli stessi termini usando un polinomio raw, ottenendo coefficienti direttamente utilizzabili.
+-   in ogni caso, se si usa `predict()` o `add_predictions()` per valutare il polinomio, il risultato è corretto indipendentemente dal tipo di polinomio usato per la regressione
+
+# Domande libere
+
+## Tabelle *Tidy*
+
+Una tabella, o data frame, è *tidy* quando riporta una variabile per colonna, un'osservazione per riga. Ad esempio, la seguente tabella **non è tidy**, perché la variabile *produttività* è distribuita su più colonne:
+
+```{r}
+df <- tribble(
+  ~macchina, ~q1, ~q2, ~q3,
+  "tornio", 100, 120, 108,
+  "fresa", 85, 90, 78,
+  "lappatrice", 30, 45, 58
+)
+
+df
+```
+
+Queste tabelle compatte sono comode da leggere, ma scomode da manipolare e mettere in grafico, perché dobbiamo aggiungere manualmente una serie per ogni colonna:
+
+
+```{r}
+df %>% ggplot(aes(x=macchina)) +
+  geom_point(aes(y=q1, color="Q1")) + 
+  geom_point(aes(y=q3, color="Q2")) + 
+  geom_point(aes(y=q2, color="Q3"))
+```
+
+Inoltre, si noti che non possiamo mettere il quadrimestre in ascissa.
+
+Se poi volessimo applicare un calcolo (ad esempio riportando la produttività come variazione percentuale rispetto al valore massimo), la procedura si farebbe ancora più complessa.
+
+Per trasformare una tabella compatta in una *tidy* si usa `pivot_longer()`: questa funzione vuole:
+
+* la tabella su cui operare ( in questo caso `df`)
+* un elenco di colonne da redistribuire, cioè quelle che contengono la variabile di interesse (tutte tranne `macchina`)
+* i nomi delle due colonne in cui mettere le intestazioni di colonna nella tabella originale (`names_to = quadrimestre`) e i valori della variabile (`values_to = "produttività"`)
+
+```{r}
+df1 <- pivot_longer(df, -macchina, names_to="quadrimestre", values_to="produttività") 
+df1
+```
+
+Questa tabella è molto più flessibile per realizzare grafici, ad esempio con il quadrimestre in ascissa e usando un grafico a barre:
+
+```{r}
+df1 %>% 
+  ggplot() + 
+  geom_col(aes(y=produttività, x=quadrimestre, fill=macchina), position="dodge")
+```
+
+Inoltre, è più facile operare sulla variabile, tornando eventualmente alla versione compatta con `pivot_wider()`:
+
+```{r}
+df1 %>% 
+  mutate(produttività = (produttività / max(produttività) * 100) %>%  round(1)) %>% 
+  pivot_wider(names_from = quadrimestre, values_from=produttività)
+```
+
+
+## Come aggiungere/modificare/rimuovere colonne o righe in una tabella
+
+Si usano le funzioni `mutate()`, `select()`, `filter()`, `slice*()`.
+
+Ad esempio, per aggiungere una colonna calcolata e poi selezionare un sottoinsieme di colonne cambiandone nome e posizione, formattando la tabella per la stampa (pdf o html):
+
+```{r}
+starwars %>% 
+  mutate(
+    height_m = height / 100.0
+  ) %>% 
+  select(
+    Nome=name, `Peso (kg)`=mass, `Altezza (m)`=height_m
+  ) %>% 
+  slice_head(n=5) %>% 
+  knitr::kable()
+```
+
+Ovviamente, `mutate()` accetta anche un intero vettore come nuova colonna (purché il numero di elementi del vettore sia uguale alla lunghezza della tabella).
+
+Si noti che `select()` accetta o un elenco di nomi di colonne, o un elenco di coppie `nuovo_nome = colonna_esistente`, consentendo di rinominare le colonne.
+
+Per **rimuovere** alcune righe sulla base del contenuto si ricorre ad un filtro, passando come argomento un *predicato*, cioè un'espressione booleana:
+
+```{r}
+starwars %>% 
+  filter(name != "Luke Skywalker" & name != "Darth Vader")
+```
+
+Invece, per rimuovere righe sulla base di indici (posizione), si usano le funzioni `slice`:
+
+```{r}
+# solo le prime 3 righe:
+starwars %>% slice_head(n=3)
+
+# solo le ultime 3:
+starwars %>% slice_tail(n=3)
+
+# una selezione di indici
+starwars %>% 
+  slice(80:(n()-2))
+
+# una selezione casuale di 1/3 del totale:
+starwars %>% 
+  slice_sample(prop=1/3)
+```
+
+Se la selezione casuale deve essere fatta per separare una tabella in un subset per training e uno per validazione, è più comodo aggiungere una colonna campionata:
+
+```{r}
+set.seed(0)
+starwars %>% 
+  mutate(train = sample(c("train","validation"), size=n(), replace=T, prob=c(80, 20)), .before=name) %>% 
+  group_by(train) %>% 
+  summarise(count = n())
+```
+
+Ad esempio, quanto segue aggiunge la colonna, poi separa la tabella in una lista di due tabelle, una per training e una per validazione:
+
+```{r}
+set.seed(0)
+starwars %>% 
+  mutate(train = sample(c("train","validation"), size=n(), replace=T, prob=c(80, 20)), .before=name) %>% 
+  group_by(train) %>% 
+  group_split(.keep=F)
+```
+
+Per aggiungere **righe** a una tabella si usa `bind_rows`. Le colonne mancanti ricevono valori `NA`:
+
+```{r}
+starwars %>% 
+  bind_rows(
+    tibble(name = "Paolo Bosetti", height=182)
+  ) %>% 
+  filter(!is.na(mass)) # rimuovo tutte le righe con un NA nella colonna massa
+  # na.omit() # per rimuovere qualsiasi riga con almeno un NA
+```
+
+
+## Piano fattoriale
+
+```{r}
+fp <- fp_design_matrix(3) %>% 
+  fp_add_scale(
+    A = c(30, 70),
+    B = c(150, 300)
+  ) %>% 
+  fp_add_names(A="temperatura", B="pressione", C="colore") %>% 
+  fp_augment_center(rep=6)
+
+fp
+```
+
+```{r}
+f <- function(a, b, c) {
+  if (!c %in% c(-1,1)) stop("c must be either -1 or 1")
+  ifelse(
+    c == -1,
+    10 + 2*a + 3*b -0.3*a*b + 2*b^2,
+    12 + 2.5*a + 6*b -2*a*b
+  ) + rnorm(1, 0, 0.7)
+}
+```
+
+
+
+```{r}
+set.seed(1)
+fp <- fp %>% 
+  mutate(
+    C = ifelse(
+      .treat == "center",
+      ifelse(.rep %% 2 == 1, -1, 1),
+      C
+    )
+  ) %>% 
+  rowwise() %>% 
+  mutate(
+    Y = f(A, B, C) %>% round(2)
+  ) %>% 
+  ungroup()
+
+fp
+```
+
+```{r}
+fp.lm <- lm(Y~A*B*C*I(A^2), data=fp)
+daniel_plot_hn(fp.lm, nlab=6)
+```
+
+```{r}
+fp.lm <- lm(Y~A*B + B*C + A:B:C + I(B^2), data=fp)
+
+anova(fp.lm)
+```
+
+
+```{r}
+fp %>% 
+  add_predictions(fp.lm) %>% 
+  mutate(across(A:C, ~ factor(.))) %>%
+  ggplot(aes(x=A)) + 
+  geom_line(aes(y=pred, color=B, group=B)) +
+  geom_point(aes(y=Y, color=B)) +
+  facet_wrap(~C, labeller=label_both)
+  
+```
+
+# Bootstrap
+
+```{r}
+data <- dimnames(iris3)[[3]] %>% 
+  reduce(
+    \(acc, species) {
+      as_tibble(iris3[,,species]) %>% 
+        mutate(Species = species) %>% 
+        bind_rows(acc)
+    },
+    .init = tibble()
+  ) %>% 
+  arrange(Species) %>% 
+  rename_with(.cols=-Species, ~ c("SL", "SW", "PL", "PW")) %>% 
+  mutate(Species = as.factor(Species))
+```
+
+```{r}
+data %>% 
+  ggplot(aes(x=PW, y=PL, color=Species)) + geom_point()
+data %>% 
+  ggplot(aes(x=SW, y=SL, color=Species)) + geom_point()
+```
+
+```{r}
+data <- data %>% 
+  filter(Species != "Setosa")
+```
+
+
+```{r}
+data.glm <- glm(
+  Species~PW+PL,
+  family=binomial,
+  data=data
+)
+
+data.glm %>% summary()
+```
+
+```{r}
+data <- data %>% 
+  add_predictions(data.glm, type="response") %>% 
+  mutate(
+    Virginica = pred > 0.5,
+    correct = (Species == "Virginica") == Virginica
+  )
+
+data
+```
+
+```{r}
+grd <- expand.grid(
+  PW = seq(min(data$PW), max(data$PW), length.out=100),
+  PL = seq(min(data$PL), max(data$PL), length.out=100)
+) %>% 
+  add_predictions(data.glm, type="response")
+
+grd
+```
+
+```{r}
+grd %>% 
+  ggplot(aes(x=PL, y=PW, z=pred)) + 
+  geom_contour_filled() + 
+  geom_point(data=data, mapping=aes(x=PL, y=PW, color=Species, shape=correct))
+```
+
