@@ -958,3 +958,103 @@ starwars %>%
   filter(!is.na(mass)) # rimuovo tutte le righe con un NA nella colonna massa
   # na.omit() # per rimuovere qualsiasi riga con almeno un NA
 ```
+
+
+
+
+# T-test manuale
+
+```{r}
+my_t_test <- function(A, B) {
+  res <- list()
+  n1 <- length(A)
+  n2 <- length(B)
+  S1 <- var(A)
+  S2 <- var(B)
+  Sp <- sqrt(((n1-1)*S1 + (n2-1)*S2)/(n1+n2-2))
+  res$T0 <- (mean(A) - mean(B))/(Sp*sqrt(1/n1 + 1/n2))
+  res$p.value <- 2*pt(abs(res$T0), n1+n2-2, lower.tail=F)
+  return(res)
+}
+
+A <- rnorm(10, 10, 2)
+B <- rnorm(12, 12, 2)
+
+res <-  my_t_test(A, B)
+cnf <- t.test(A, B, var.equal = T)
+
+res$p.value - cnf$p.value < 1E-6
+res$T0 - as.numeric(cnf$statistic) < 1E-6
+```
+
+
+```{r}
+set.seed(202)
+x <- runif(100, 0, 10)
+y <- 3 + 2*x + rnorm(100, sd = 2)
+df <- tibble(x=x, y=y)
+
+m <- lm(y~x)
+
+list(
+  R2 = summary(m)$r.squared,
+  beta = m$coefficients[2],
+  mean_r = mean(rstandard(m)),
+  var_r = var(rstandard(m))
+)
+```
+
+## Bootstrap
+
+```{r}
+library(boot)
+set.seed(1)
+ci <- starwars %>%
+  select(mass) %>% 
+  na.omit() %>% 
+  pull(mass) %>% 
+  boot(R=1000, statistic=\(data, idx) range(data[idx]) %>% diff()) %>% 
+  boot.ci(type="perc")
+ci$percent[4:5]
+
+ci
+
+```
+
+```{r}
+library(boot)
+set.seed(1)
+
+stat <- function(df) {
+  df %>% 
+  lm(mass~height-1, data=.) %>% 
+  coef()
+}
+
+ci <- starwars %>%
+  select(mass, height) %>%
+  na.omit() %>% 
+  boot(R=1000, statistic=\(data, idx) stat(data[idx,])) %>% 
+  boot.ci(type="perc")
+ci$percent[4:5]
+```
+
+```{r}
+set.seed(1)
+# completare qui
+df3 <- starwars %>% 
+  select(mass, height)
+df3 <- na.omit(df3)
+df3.lm <- lm(mass~height-1, data = df3)
+df3.ci <- boot(
+  data = df3,
+  statistic = \(x, i) coef(lm(mass~height-1, data = x[i,])),
+  R = 1000
+     ) %>% 
+  boot.ci(
+    type = "perc",
+    conf = 0.95
+  )
+df3.ci$percent[4:5]
+```
+

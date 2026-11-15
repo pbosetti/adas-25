@@ -387,7 +387,7 @@ In termini di formula R, l'equivalente è:
 
 
 ```{r}
-df.lm <- lm(y ~ poly(x1, 2, raw=T) * poly(x2, 2, raw=T), data=df)
+df.lm <- lm(y ~ poly(x1, 2) * poly(x2, 2), data=df)
 summary(df.lm)
 ```
 

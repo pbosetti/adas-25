@@ -1,0 +1,753 @@
+---
+title: "Lezione3"
+author: "Paolo Bosetti"
+date: "`r Sys.Date()`"
+format:
+  pdf: 
+    toc: true
+    number-sections: true
+    papersize: "a5"
+    fontsize: "8pt"
+    geometry:
+      - margin=5mm
+    include-in-header:
+      text: |
+        \usepackage{fvextra}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(adas.utils)
+library(modelr)
+library(ROCR)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Regressione lineare
+
+## Modello lineare univariato
+
+Generiamo dei dati in modo che sia:
+
+$$
+y_i = b x_i + cx_i^2 + \varepsilon_i = y_{\text{nom},i} + \varepsilon_i,~~~\varepsilon_i\sim\mathcal N(0, \sigma^2)
+$$
+con $a = 0$, $b=2$, $c=0.1$ e $\sigma=2$.
+
+
+```{r}
+set.seed(0)
+N <- 100
+a <- 1
+b <- 2
+c <- 0.1
+
+df <- tibble(
+  x = seq(-10, 10, length.out = N),
+  y_nom = a + b * x + c * x^2,
+  y = y_nom + rnorm(N, 0, 2)
+)
+
+df %>% 
+  ggplot(aes(x = x)) +
+  geom_line(aes(y = y_nom), color="red", linetype=2) +
+  geom_point(aes(y = y))
+
+```
+
+Si noti che la nominale `y_nom` (cioè $y_{\text{nom},i}$) è normalmente ignota.
+
+Definiamo un modello lineare di secondo grado, dato che la relazione $y=f(x)$ mostra una curvatura. La *formula* R corrispondente a $y=a + bx + cx^2$ è `y ~ x + I(x^2)`. Si noti che `x^2` sarebbe normalmente espanso, secondo l'algebra delle formule, come `x*x`, cioè `x + x + x:x`, cioè in definitiva `x`. Per questo motivo l'espressione quadrata va **protetta** con la funzione identità `I()`, che dice a R: *"non espandere questa espressione ma trattala così com'è"*.
+
+```{r}
+(df.lm <- lm(y ~ x + I(x^2), data = df))
+```
+
+Si nota che il modello lineare che si ottiene contiene già i valori stimati per i tre coefficienti $a$, $b$ e $c$.
+
+Tutte le informazioni contenute in `df.lm` sono elencabili con `summary()`:
+
+```{r}
+coef(df.lm)
+```
+
+Per regredire polinomi di grado superiore è più rapido usare `poly()`, funzione che costruisce un polinomio del grado desiderato. **Ricordarsi di passare sempre l'opzione `raw=TRUE`**.
+
+```{r}
+d <- 3
+df.lmo <- lm(y ~ poly(x, d), data=df) 
+df.lmo %>% summary() 
+df.lmo %>% coef()
+df.lm <- lm(y ~ poly(x, d, raw=T), data=df) 
+df.lm %>% summary()
+df.lm %>% coef()
+```
+
+Ulteriori informazioni sulla regressione si ottengono con `summary()`. In particolare, si nori il corfficielte di determinazione $R^2$ e i *p-value* associati a ciascun coefficiente del modello: coefficienti con *p-value* alto possono essere rimossi dal modello, perché il loro contributo non è statisticamente significativo:
+
+```{r}
+summary(df.lm)
+```
+
+In questo caso osserviamo che l'intercetta (cioè $a$) può essere rimossa. Per rimuovere l'intercetta in una formula basta sottrarre 1:
+
+```{r}
+(df.lm <- lm(y ~ x + I(x^2) - 1, data = df))
+```
+
+```{r}
+summary(df.lm)
+```
+
+È sempre importante verificare la normalità e l'assenza di pattern dei residui:
+
+```{r}
+df2 <- df %>% 
+  add_residuals(df.lm) %>% 
+  add_predictions(df.lm)
+
+df2 %>% 
+  ggplot(aes(x=x)) + 
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=pred), color="green") + 
+  geom_line(aes(y=y_nom), color="red")
+```
+
+```{r}
+shapiro.test(df2$resid)
+
+df2 %>% 
+  ggplot(aes(sample=resid)) + 
+  geom_qq() + 
+  geom_qq_line(color="red")
+
+df2 %>% 
+  ggplot(aes(x = x)) + 
+  geom_point(aes(y = resid))
+```
+
+Se si desidera solo visualizzare la regressione e la **banda di confidenza** su un grafico, si può ricorrere a `geom_smooth()`:
+
+
+```{r}
+df %>% 
+  ggplot(aes(x=x, y=y)) + 
+  geom_smooth(
+    method="lm",
+    formula = y ~ x + I(x^2) - 1,
+    level = 0.95
+  ) +
+  geom_point()
+```
+
+## Estrapolazione
+
+Si è visto in teoria che il sovra-adattamento ha due effetti nocivi:
+
+* perdita di generalità
+* inaffidabile in estrapolazione
+
+Vediamo quindi cosa succede in estrapolazione, cioè quando si valuta un modello al di fuori dell'intervallo su cui il modello è stato addestrato/regredito.
+
+Anzitutto etichettiamo le osservazioni con una colonna `subset` che valga `"in"` tra $(-7.5, 7.5)$ e `"out"` al di fuori:
+
+```{r}
+df3 <- df %>% 
+  mutate(
+    subset = ifelse(x > -7.5 & x < 7.5, "in", "out")
+  )
+
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point()
+```
+
+Applichiamo la regressione con un modello di grado eccessivo, diciamo 5, ma **solo** sul subset `"in"`:
+
+```{r}
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point() +
+  geom_smooth(
+    data = filter(df3, subset=="in"),
+    method="lm", 
+    formula = y ~ poly(x, 5, raw=T)
+  ) 
+```
+
+Si noti come è possibile passare a una qualsiasi geometria un dataset diverso da quello base, ricevuto da `ggplot()` via pipe.
+
+Per estendere il modello al di fuori dell'intervallo di addestramento si aggiunge l'argomento `fullrange=TRUE` a `geom_smooth()`:
+
+```{r}
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point() +
+  geom_smooth(
+    data = filter(df3, subset=="in"),
+    fullrange = T,
+    method="lm", 
+    formula = y ~ poly(x, 5, raw=T)
+  ) 
+```
+
+Osserviamo come le bande di confidenza si allarghino molto più rapidamente che nel caso di un adattamento corretto (polinomio di grado 2).
+
+Proviamo ad esagerare con il grado del polinomio. In questo caso è evidente come in estrapolazione il modello regredito "esploda" molto rapidamente, e come all'interno dell'intervallo di addestramento il modello tende a inseguire i punti sperimentali, perdendo quindi di generalità:
+
+```{r}
+df3 %>% 
+  ggplot(aes(x=x, y=y, color=subset)) + 
+  geom_point() +
+  geom_smooth(
+    data = filter(df3, subset=="in"),
+    fullrange = T,
+    method="lm", 
+    formula = y ~ poly(x, 21, raw=T)
+  ) + 
+  coord_cartesian(ylim=c(-20,40))
+```
+
+Infine, vediamo come ottenere **esplicitamente** l'intervallo di confidenza per il modello lineare `df.lm`. Si usa la funzione `predict()`, che restituisce una tabella che può essere affiancata a `df` con `bind_cols()`:
+
+```{r}
+df %>% 
+  bind_cols(predict(df.lm, interval="confidence")) %>% 
+  ggplot(aes(x=x)) +
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=fit)) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr), alpha=0.5)
+```
+
+
+# Cross-validazione
+
+Una tecnica molto comune quando si tratta di confrontare diversi modelli di regressione è la **cross-validazione**. Consiste nel confrontare un indice di qualità della regressione per diversi modelli calcolato sia sui dati utilizzati per la regressione, sia su dati **nuovi**, cioè che non sono stati impiegati per la regressione del modello. Questi dati sono chiamati **dati di validazione**.
+
+Generalmente si procede dividendo l'intero set di dati in un sottoinsieme di dati di **training** e uno di **validazione**, in regime 80/20. Vediamo i dettagli con un esempio:
+
+```{r}
+df <- examples_url("kfold.csv") %>% read_csv(show_col_types = FALSE)
+
+df %>% 
+  ggplot(aes(x=x, y=y)) +
+  geom_point()
+```
+
+Osserviamo come il grado opportuno del polinomio da utilizzare per la regressione non sia immediatamente evidente. Infatti, effettuando una regressione con un modello di primo grado e osservando i residui, si vede come c'è evidentemente un *pattern*, ma è difficile dire quale sia il grado del polinomio più adatto:
+
+```{r}
+df %>% 
+  add_residuals(lm(y~x, data=df)) %>% 
+  ggplot(aes(x=x, y=resid)) +
+  geom_point()
+```
+
+Procediamo con la suddivisione dei dati in un 80% per il training e un 20% per la validazione. Possiamo aggiungere ai dati una colonna con un 80% di valori `TRUE` e il resto `FALSE`, usando la funzione `sample()`:
+
+```{r}
+set.seed(1)
+df <- df %>% 
+  mutate(
+    train = sample(c(T, F), n(), T, c(80,20))
+  ) 
+
+df %>% 
+  ggplot(aes(x=x, y=y, color=train)) + 
+  geom_point()
+```
+
+Si noti che `sample(c(T, F), n(), T, c(80,20))` restituisce un vettore di valori booleani che *in valore atteso* sono in rapporto 80/20, ma potrebbero essere qualcuno in più o qualcuno in meno. Se vogliamo esattamente il rapporto desiderato possiamo procedere come segue:
+
+```{r}
+set.seed(1)
+df <- df %>% 
+  mutate(train = 1:n() > n()*0.2) %>% 
+  mutate(train = sample(train))
+
+df %>% 
+  ggplot(aes(x=x, y=y, color=train)) + 
+  geom_point()
+```
+
+Come si vede, ci sono spesso più modi alternativi per ottenere analoghi risultati. Inoltre, per campioni molto grandi (centinaia di elementi), il primo metodo è in genere sufficiente. In campioni più piccoli, come quello in esame, il campione di validazione consiste in poche osservazioni, quindi vogliamo evitare casi in cui il set di validazione consista in soli due-tre punti, e quindi il secondo sistema è da preferire.
+
+Possiamo ora costruire una **lista di modelli** corrispondenti a polinomi di grado crescente. Usiamo la funzione `map()`:
+
+```{r}
+models <- df %>% 
+  filter(train) %>% { # il df filtrato viene passato come variabile . a tutte lefunzioni che stanno nel blocco {}
+    map(1:10, \(n) lm(y~poly(x, n, raw=T), data=.))
+  }
+```
+
+Ora `models` è una **lista di modelli lineari**. Da questa lista possiamo estrarre alcuni indici di qualità, come il coefficiente di determinazione. Si ricordi cahe dato un modello lineare `df.lm`, il valore di $R^2$ può essere ottenuto come `summary(df.lm)$r.squared` oppure, usando la libreria `modelr`, come `rsquare(df.lm)`. quindi, usando di nuovo `map`, ci costruiamo una tabella che, per ogni indice del polinomio, riporta il valore di $R^2$ calcolato per ogni modello per i dati di training e per quelli di validazione:
+
+```{r}
+tibble(
+  n = 1:length(models), # oppure: seq_along(models)
+  train = map_dbl(models, \(m) rsquare(m, data=filter(df, train))),
+  valid = map_dbl(models, \(m) rsquare(m, data=filter(df, !train)))
+) %>% 
+  # rendiamola tidy per semplificare il plot:
+  pivot_longer(-n, names_to="set", values_to = "rsq") %>% 
+  ggplot(aes(x=n, y=rsq, fill=set)) + 
+  geom_col(position="dodge")
+```
+
+Osserviamo che, mentre il valore di $R^2$ calcolato sui dati di training cresce monotonamente con il grado del polinomio (come atteso), quando $R^2$ è invece calcolato sui dati di validazione raggiunge un massimo tra 3 e 4, dopodiché peggiora.
+
+Più efficiente di $R^2$, per questo tipo di analisi, è il **residuo quadratico medio** RMSE, definito come:
+
+$$
+\mathrm{RMSE} = \sqrt{\frac{\sum_{i=1}^n (y_i - \hat y_i)^2}{n}} = \sqrt{\frac{\sum_{i=1}^n \varepsilon_i^2}{n}} 
+$$
+
+Il valore di RMSE di un dato modello può essere valutato come `rmse(data, model)`, sempre mediante la libreria `modelr`:
+
+```{r}
+tibble(
+  n = seq_along(models),
+  train = map_dbl(models, \(m) rmse(m, data=filter(df, train))),
+  valid = map_dbl(models, \(m) rmse(m, data=filter(df, !train)))
+) %>% 
+  pivot_longer(-n, names_to="set", values_to = "rsq") %>% 
+  ggplot(aes(x=n, y=rsq, fill=set)) + 
+  geom_col(position="dodge") + 
+  scale_x_continuous(n.breaks=10) # Regolo la griglia dell'asse x
+```
+
+Qui gli andamenti sono molto più evidenti: il valore di RMSE valutato sui dati di training decresce con continuità, perché il modello insegue sempre più i singoli punti e quindi i residui diventano sempre più piccoli. Viceversa, quando valutiamo RMSE su dati **che non sono stati usati per la regressione**, esso raggiunge un minimo per il grado 3, poi torna ad aumentare perché i modelli perdono di generalità (*over-fitting*). 
+
+Concludiamo quindi che la regressione con un polinomio di grado 3 sia la più adatta: grado inferiori soffrono di *under-fitting*, gradi superiori di *over-fitting*.
+
+**ESERCIZIO**: selezionare la regressione con un polinomio di grado 3, valutare quali termini siano eventualmente da rimuovere perché non significativi, e verificare i residui per pattern e normalità.
+
+
+
+# Dati multivariati
+
+È possibile costruire modelli lineari **multivariati**, cioè che abbiano più di un predittore. In generale, questi modelli rappresentano relazioni in forma di **campi scalari** $\mathbb R^n\rightarrow \mathbb R$ del tipo:
+
+$$
+y = f(x_1, x_2,\dots x_n, c_1, c_2, \dots, c_m)
+$$
+
+Al solito, costruiamoci un esempio partendo da una relazione nominale:
+
+```{r}
+# relazione y = f(x1, x2)
+y <- function(x1, x2) 10 - x1 + 0.1*x1^2 + 0.1*(-10*x2 + 1.5*x2^2) + 0.05*x1*x2
+```
+
+Avendo due predittori, anziché una sequenza di valori in $\mathbb R$ per un unico predittore, dobbiamo costruire una **griglia** di combinazioni in $\mathbb R^2$:
+
+```{r}
+# 50 valori per asse, griglia da 2500 punti:
+N <- 50
+dfn <- expand.grid(
+  x1 = seq(0, 10, length.out = N),
+  x2 = seq(0, 10, length.out = N)
+) %>% 
+  # valutiamo la funzione nominale per ogni punto (x1, x2):
+  mutate(
+    y = y(x1, x2)
+  )
+
+# Grafico a contorno:
+dfn %>% 
+  ggplot(aes(x=x1, y=x2, z=y)) +
+  geom_contour_filled()
+```
+
+Ora simuliamo una serie di misurazioni: dalla griglia di 2500 punti ne selezioniamo casualmente 100, ripetendo ogni punto tre volte. In corrispondenza di ogni punto simuliamo poi tre misurazioni (cioè aggiungiamo al valore nominale un disturbo normale):
+
+```{r}
+set.seed(10)
+Ns <- 100
+rpt <- 3
+
+df <- dfn %>% 
+  slice_sample(n=Ns) %>% 
+  slice(rep(1:n(), each=rpt)) %>% 
+  mutate(y = y + rnorm(n(), 0, range(y)/25))
+```
+
+Mettiamo in grafico i contorni del modello nominale assieme ai punti campionati, colorati in base al valore misurato:
+
+```{r}
+dfn %>% 
+  ggplot(aes(x=x1, y=x2)) +
+  geom_contour(aes(z=y)) +
+  # Attenzione: i dati misurati stanno in un altro dataframe, quindi dobbiamo
+  # passarlo alla geometria con il parametro data:
+  geom_point(data=df, aes(color=y)) + 
+  scale_color_viridis_c() # Cambia la scala colore
+```
+
+**NOTA**: i colori in un grafico sono una **scala** e possono essere quindi modificati con le funzioni `scale_color_*()`. In particolare, le scale **viridis** sono scale colore studiate in modo da essere distinguibili anche quando stampate in bianco e nero e anche da soggetti che soffrono di daltonismo.
+
+Ora consideriamo solo i dati misurati (data frame `df`) e creiamo un modello di regressione lineare polinomiale di grado 2, visto che anche guardando i soli punti si osserva una concavità. Avendo due predittori, il modello **completo** (cioè che include tutte le possibili interazioni), è:
+
+$$
+y = \mu + c_1x_1 + c_2x_1^2 + c_3x_2 + c_4x_2^2 + c_5x_1x_2^2 + c_6x_1^2x_2 + c_7x_1^2x_2^2
+$$
+
+In termini di formula R, l'equivalente è:
+
+
+```{r}
+df.lm <- lm(y ~ poly(x1, 2, raw=T) * poly(x2, 2, raw=T), data=df)
+summary(df.lm)
+```
+
+Osserviamo che nessuna delle interazioni è significativa, anche se il termine `x1:x2` ha un *p-value* pari a circa il 17%. Prudenzialmente, includiamo anche questa interazione oltre ai termini base (notare il `+` al posto del `*` tra i due polinomi):
+
+```{r}
+df.lm <- lm(y ~ poly(x1, 2, raw=T) + poly(x2, 2, raw=T) + x1:x2, data=df)
+summary(df.lm)
+```
+
+Il sommario conferma la significatività del termine `x1:x2`. Il modello accettato è quindi:
+
+$$
+y=\mu + c_1x_1 + c_2x_1^2 + c_3x_2 + c_4x_2^2 + c_5x_1x_2
+$$
+Ora confrontiamo il modello regredito con il modello nominale, usando due grafici a contorno:
+
+```{r}
+dfn %>% 
+  add_predictions(df.lm) %>% 
+  ggplot(aes(x=x1, y=x2, z=y)) + 
+  geom_contour_filled(bins=10) + 
+  geom_contour(aes(z=pred), bins=10)
+```
+
+**ESERCIZIO**: analizzare i residui (pattern e normalità).
+
+
+# Regressione non lineare
+
+## Regressione ai minimi quadrati
+
+Se il modello da regredire non è lineare nei coefficienti (ad esempio perché è definito per parti), non è possibile effettuare una regressione con `lm`. In questi casi bisogna usare la **regressione non-lineare ai minimi quadrati** fornita in R dalla funzione `nls()` (*Nonlinear Least-Squares*).
+
+Come esempio consideriamo il caso di una misura di durezza mediante **indentazione strumentata**. Abbiamo un dispositivo che registra la forza applicata da un penetratore pressato sulla superficie piana di un materiale in funzione del tempo (o dello spostamento verticale). Il segnale della forza avrà inizialmente (prima del contatto) un valore nominale costante che chiamiamo `bias`, poi al tempo di contatto `t0` il carico comincia a aumentare seguendo una legge quadratica, con tangenza tra il tratto costante e quello parabolico. Possiamo definire una funzione R parametrica in questo modo:
+
+```{r}
+f <- function(t, t0=0, bias=0, a=1) {
+  b <- -2 * a * t0
+  c <- bias + a * t0^2
+  y <- a * t^2 + b * t + c
+  return(ifelse(t < t0, bias, y))
+}
+```
+
+Possiamo verificare il grafico di questa funzione creando una tabella di dati di appoggio:
+
+```{r}
+tibble(
+  t = seq(-2.5, 5, length.out=100),
+  f = f(t, -1, 1, 0.5)
+) %>% 
+  ggplot(aes(x=t, y=f)) + 
+  geom_line()
+```
+
+Possiamo anche creare direttamente il grafico con la geometria `geom_function()`. In questo caso dobbiamo esplicitamente specificare l'intervallo X con `xlim()`, dato che non essendoci un data frame di appoggio esso non è definito:
+
+```{r}
+ggplot() +
+  geom_function(fun=f, args=list(bias=1, t0=-1, a=0.5)) +
+  geom_vline(xintercept = -1, linetype=2) + # linea verticale a x=-1
+  xlim(c(-2.5,5)) +
+  labs(x="Tempo (s)", y="Carico (N)")
+```
+
+Ora possiamo simulare l'esperimento creando un set di dati e aggiungendo del rumore:
+
+```{r}
+set.seed(1)
+data <- tibble(
+  t = seq(-10, 10, length.out=100),
+  yn = f(t, 2.5, 3, 1),
+  y = yn + rnorm(length(t), 0, 2)
+)
+
+data %>% 
+  ggplot(aes(x=t, y=y)) + 
+  geom_point()
+```
+È il caso di una regressione di un *modello fisico*, che però non è lineare (e non è nemmeno analitico, essendo definito per parti).
+
+La regressione non è quindi realizzabile né con `lm`, né con `glm`. È necessario ricorrere alla **regressione ai minimi quadrati** con `nlm`. Analogamente a `lm()`, questa funzione di regressione vuole una formula e il set di dati su cui operare. In più, però, è necessario specificare anche la lista di **condizioni iniziali** (*guess*) di avvio dell'ottimizzazione, come lista passata al parametro `start`:
+
+```{r}
+data.nls <- nls(y~f(t, t0, b, a), 
+    data=data,
+    start=list(
+      t0 = 0,
+      b = 0,
+      a = 10
+    ),
+    trace=TRUE)
+
+summary(data.nls)
+```
+
+L'opzione `trace=TRUE` fornisce in output i passi iterativi e i parametri di ottimizzazione. Si noti inoltre che la formula deve contenere una funzione del (o dei) predittori e dei coefficienti del modello.
+
+I coefficienti risultano:
+
+```{r}
+coefficients(data.nls)
+```
+
+Il modello regredito può essere al solito messo in grafico con `add_predictions()`:
+
+```{r}
+data %>% 
+  add_predictions(data.nls) %>% 
+  ggplot(aes(x=t)) + 
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=pred), color="red")
+```
+
+**ESERCIZIO**: completare l'esempio con l'analisi dei residui.
+
+A questo punto, il diagramma di carico può essere: 
+
+* compensato per il termine `bias` (che rappresenta la *tara*, cioè il carico percepito dal sensore di forza quando non c'è contatto)
+* traslato a zero nel momento di contatto
+* depurato delle misure prima del contatto
+
+```{r}
+coef <- coefficients(data.nls)
+data %>% 
+  add_predictions(data.nls) %>% 
+  mutate(
+    y = y - coef["b"],
+    pred = pred - coef["b"],
+    t = t - coef["t0"]
+  ) %>% 
+  filter(t > 0) %>% 
+  ggplot(aes(x=t)) + 
+  geom_point(aes(y=y)) + 
+  geom_line(aes(y=pred), color="red") +
+  labs(x="tempo (s)", y="Carico (N)")
+```
+
+Si noti che per i modelli `nls` non è possibile ottenere direttamente gli intervalli di confidenza:
+
+```{r}
+predict(data.nls, interval="confidence")
+```
+
+Cioè, anche se richiediamo la banda di confidenza, la funzione `predict()` applicata a un modello `nls` restituisce **solo** la predizione. Ciò è dovuto al fatto che, se per i modelli lineari la banda di confidenza può essere calcolata analiticamente, per i modelli non-lineari non è possibile farlo.
+
+Tuttavia, è possibile *simulare* la banda di confidenza con metodi numerici/iterativi, ad esempio usando `predFit()` nella libreria `investr`:
+
+```{r}
+library(investr)
+data %>%
+  bind_cols(
+    predFit(
+      data.nls, 
+      newdata=., # ricorda: . rappresenta i dati ricevuti via pipe
+      level=0.99,
+      interval="confidence"
+    )
+  ) %>% 
+  mutate(
+    t = t - coef["t0"],
+    across(y:upr, \(f) f - coef["b"])
+  ) %>% 
+  filter(t > 0) %>% 
+  ggplot(aes(x=t)) + 
+  geom_point(aes(y=y)) + 
+  geom_ribbon(aes(ymin=lwr, ymax=upr), alpha=1/3) +
+  geom_line(aes(y=fit), color="red") +
+  labs(x="tempo (s)", y="Carico (N)", 
+       title="Conf.level: 0.99%")
+```
+
+## Regressione lineare generalizzata
+
+Abbiamo i risultati di un esperimento che valuta il *drop test* di bottiglie di sapone liquido.
+
+La colonna `OK` indica i flaconi sopravvissuti al test. Siccome generalmente siamo interessati a test statistici che segnalano le **anomalie** (non la normalità), preferiamo utilizzare l'opposto, cioè una colonna `fail` che sia `TRUE` per i flaconi rotti.
+
+```{r}
+data <- examples_url("soap_bottles.dat") %>% 
+  read_table(comment="#") %>% 
+  mutate(
+    fail = !OK
+  ) %>% 
+  select(-OK)
+
+data %>% slice_head(n=10)
+```
+
+Il *drop test* verifica la resistenza alla caduta da 1 m di altezza di una bottiglia di sapone liquido in funzione del livello di riempimento (in % del valore nominale). Bottiglie più piene hanno un polmone d'aria (che è comprimibile) più ridotto, e quindi hanno una maggior probabilità di rottura per via della sovrapressione che si crea in seguito all'impatto col suolo. I dati dell'esperimento riportano il livello di riempimento effettivo e il risultato del test per `r length(data$run)`.
+
+L'esperimento è stato condotto impostando il dosatore dell'impianto di imbottigliamento a un livello di riempimento di 99.3% per 200 bottiglie e a 99.6% per altre 200 bottiglie, e misurando poi con un sistema di precisione l'effettivo riempimento prima del test di rottura.
+
+I risultati possiamo osservarli in un istogramma:
+
+```{r}
+data %>% 
+  ggplot(aes(x = p)) + 
+  geom_histogram(bins=20, fill=gray(1/2), color=gray(1/3)) +
+  geom_rug(aes(color=fail))
+```
+
+È evidente l'**andamento bimodale** dell'istogramma: ci sono cioè due massimi, dato che l'istogramma è la sovrapposizione di due distribuzioni (una a 99.3% di livello atteso, una al 99.6%). Il comando `geom_rug()` aggiunge una "stuoia" (*rug*) di linee in basso, una per ogni osservazione, colorate in funzione del risultato del *drop test*. Come si osserva, le due popolazioni sono parzialmente sovrapposte, ed è quindi il caso tipico in cui si può ottenere un classificatore con una regressione logistica.
+
+Prima di tutto dividiamo il dataset in due classi, una su cui fare la regressione e una su cui fare la validazione, in ragione di 80/20:
+
+```{r}
+set.seed(0)
+data <- data %>% 
+  mutate(
+    training = sample(c("train", "valid"), n(), prob=c(4, 1), replace=TRUE)
+  )
+```
+
+Ora possiamo costruire il modello lineare generalizzato (logistico) sul sottoinsieme di training (`family="binomial"` specifica di usare la funzione di collegamento logistica, corrispondente ad una distribuzione binomiale dei residui):
+
+```{r}
+data.glm <- glm(fail ~ p, data = filter(data, training == "train"), family="binomial")
+summary(data.glm)
+```
+
+Si noti che R assume come funzione logistica la seguente versione:
+
+$$
+\mathrm{logit}(x) = \frac{1}{1+\exp(-px-m))}
+$$
+che è del tutto equivalente alla:
+$$
+\mathrm{logit}(x) = \frac{1}{1+\exp(-p(x-x_0))}
+$$
+definendo $x_0=-m/p$.
+
+Possiamo quindi calcolare la **soglia di classificazione** sul livello di riempimento `p` come:
+
+```{r}
+# x0 = -p/m
+(x0 <- -data.glm$coefficients[1] / data.glm$coefficients[2])
+```
+
+Cioè le bottiglie con un livello di riempimento effettivo superiore a `r x0` tendono a rompersi nel *drop test*, e il numero di **falsi positivi** (bottiglie al di sopra di `x0` che sopravvivono) è uguale al numero di **falsi negativi** (bottiglie al di sotto di `x0` che si rompono).
+
+Aggiungiamo le predizioni ai dati originali:
+
+```{r}
+data <- data %>% 
+  add_predictions(data.glm, type="response")
+```
+
+Ora possiamo mettere in grafico e confrontare i risultati del test e le predizioni, sia sui dati di training che su quelli di validazione:
+
+```{r}
+data %>% 
+  mutate(
+    correct = (fail == (pred > 0.5))
+  ) %>% 
+  ggplot(aes(x=p)) + 
+  geom_line(aes(y=pred)) + 
+  geom_point(aes(y=as.numeric(fail), color = correct)) +
+  geom_vline(xintercept = x0, linetype=2) +
+  facet_wrap(~ training, nrow=2)
+```
+
+Si noti l'uso di `facet_wrap()`: separa su più grafici i dati da visualizzare, suddividendoli per i valori di fattori espressi dal secondo membro di una formula (in questo caso `~training`).
+
+Confrontiamo i conteggi per le varie condizioni (training e validazione, bottiglia rotta o meno, predizione corretta o errata):
+
+```{r}
+error_type <- function(outcome, pred) {
+  if (outcome == pred) return("correct")
+  if (outcome & !pred) return("false neg")
+  if (!outcome & pred) return("false pos")
+}
+
+data %>% 
+  mutate(
+    type = map2_chr(fail, pred > 0.5, error_type)
+  ) %>% 
+  group_by(training, fail, type) %>% 
+  summarise(count = n())
+```
+
+Alcune note:
+
+* ho creato una funzione per definire la tabella di verità (o matrice di confusione) per i possibili risultati del test, assumendo che **un positivo sia una bottiglia rotta** (dato che il negativo è sempre la condizione normale, attesa), e quindi un **falso positivo** sia una bottiglia intera che secondo il modello dovrebbe rompersi
+* la funzione `error_type()` non è vettorializzata (contiene dei condizionali), quindi per creare una colonna mediante tale funzione devo applicarla elemento per elemento, e uso la funzione `map2_chr()`, cioè una mappa a due valori che restituisce una stringa
+
+Osservando la tabella, in training ho 14 falsi negativi e 12 falsi positivi, come atteso. In validazione ho 3 falsi positivi e 2 falsi negativi: la differenza è minima e quindi **posso accettare il modello**.
+
+**ESERCIZIO** calcolare le percentuali
+
+Le matrici di confusione possono essere create anche con la funzione `table()`. Questa funzione vuole una tabella (oppure due vettori di uguale lunghezza) e restituisce una matrice che riposrta i conteggi delle varie combinazioni riscontrate, riga per riga (cioè quanti `TRUE TRUE`, `FALSE FALSE`, `TRUE FALSE` e `FALSE TRUE`):
+
+```{r}
+mc_t <- tibble(
+  Actual = filter(data, training=="train") %>% pull(fail),
+  Predicted = filter(data, training=="train") %>% pull(pred) > 0.5
+) %>% table()
+mc_t
+```
+
+Questo approccio ha il vantaggio che il risultato è una matrice e quindi può essere sottoposta a operazioni algebriche vettorializzate, ad esempio per trasformare il conteggio in percentuale:
+
+```{r}
+round(mc_t / sum(mc_t) * 100, 1)
+```
+
+Per i dati di validazione si ha:
+
+```{r}
+mc_v <- tibble(
+  Actual = filter(data, training=="valid") %>% pull(fail),
+  Predicted = filter(data, training=="valid") %>% pull(pred) > 0.5
+) %>% table()
+mc_v
+round(mc_v / sum(mc_v) * 100, 1)
+```
+
+In un colpo solo, ottenendo un **tensore** (cioè una matrice 2x2x2):
+
+```{r}
+data %>% 
+  mutate(Predicted = pred > 0.5) %>% 
+  select(Actual = fail, Predicted, Subset = training) %>% 
+  table()
+```
+
+Spesso è interessante modificare la soglia di allarme: scegliendola maggiore o minore di 0.5 è possibile modificare il rapporto tra falsi positivi e falsi negativi. Ciò è interessante quando le conseguenze associate ad un falso negativo sono, ad esempio, peggiori di quelle associate a un falso positivo (si pensi ad esempio ad un test di infettività).
+
+Nel nostro caso, ad esempio, guardando i grafici che riportano i punti e la curva logistica, osserviamo che aumentare la soglia significa avere più falsi positivi e meno falsi negativi. 
+
+C'è un metodo formale per identificare il valore di soglia più opportuno che studia la **performance** dei classificatori mediante le curve *receiver operating characteristic* (ROC).
+
+Usando il pacchetto `ROCR` otteniamo un grafico della quantità relativa di falsi positivi (`"fpr"`) contro quella di falsi negativi (`"fnr"`), in funzione di valori di soglia da 0 a 1 (indicato come colori e numeri sulla curva).
+
+```{r}
+pred <- prediction(
+  filter(data, training == "train") %>% pull(pred),
+  filter(data, training == "train") %>% pull(fail)
+)
+perf <- performance(pred, "fpr", "fnr")
+plot(perf, colorize=TRUE, print.cutoffs.at=seq(0, 1, 0.2))
+grid()
+```
+
+La curva ci dice che aumentare la soglia da 0.5 a 0.8 provoca un aumento del falsi negativi superiore alla riduzione di falsi positivi. Oppure, ridurre la soglia da 0.5 a 0.3 riduce sensibilmente i falsi negativi senza peggiorare troppo i falsi positivi. È insomma uno strumento di progettazione, che serve a mettere a punto le prestazioni del classificatore.
+
+Può anche essere utile a confrontare diversi classificatori: infatti tanto più il ginocchio della curva è marcato, tanto più il classificatore è efficiente. Una curva dritta tra `(0,1)` e `(1,0)`, ad esempio, indicherebbe due classi molto sovrapposte e quindi difficili da separare e con una frazione di falsi positivi e falsi negativi molto elevata, comparabile con quella delle predizioni corrette.
+
+
+

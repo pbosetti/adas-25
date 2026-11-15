@@ -1,0 +1,1367 @@
+---
+title: "Lezione 2"
+format:
+  pdf: 
+    toc: true
+    number-sections: true
+    papersize: "a5"
+    fontsize: "8pt"
+    geometry:
+      - margin=5mm
+    include-in-header:
+      text: |
+        \usepackage{fvextra}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+# ATTENZIONE: questo è un blocco di setup: viene eseguito automaticamente PRIMA 
+# di eseguire qualunque blocco successivo. Fate la prova: riavviate RStudio, 
+# Aprite questo file e eseguite ad esempio il secondo blocco R. Vedrete che 
+# questo blocco viene eseguito per primo.
+
+# ATTENZIONE: se cliccate sul menu ingranaggio DOPO aver chiamato questo blocco
+# "setup", modificate le "Default chunk options", cioè le opzioni per tutti i 
+# blocchi successivi. Quindi se disabilitate la visualizzazione del codice, 
+# la disabilitate per tutti i blocchi successivi. Ve ne accorgete perché compare
+# qualcosa di simile:
+#  knitr::opts_chunk$set(eval = FALSE, include = FALSE)
+# Se invece volete personalizzare SOLO QUESTO blocco, inserite a mano le opzioni 
+# del blocco, come sopra, oppure rimuovete il nome "setup", cliccate 
+# sull'ingranaggio, modificate le impostazioni e aggiungete il nome setup.
+
+# Eseguo lo script con le mie funzioni personalizzate:
+library(modelr)
+library(adas.utils)
+library(outliers)
+
+knitr::opts_chunk$set(
+  fig.dim=c(6,3),      # dimensioni delle figure in pollici
+  fig.align = "center"
+)
+```
+
+# Tidyverse
+
+`Tidyverse` è una meta-libreria, cioè una collezione di librerie, che trasforma il modo in cui si utilizza R per descrivere algoritmi di manipolazione e analisi dati.
+
+```{r}
+library(tidyverse)
+```
+
+Caricando la libreria si vede che in effetti si tratta di 9 librerie separate:
+
+1.  `tibble`: data frame evoluti
+2.  `readr`: lettura/scritura file
+3.  `dplyr`: manipolazione dati
+4.  `tidyr`: riorganizzazione di data frame
+5.  `ggplot2`: realizzazione grafici
+6.  `purrr`: programmazione funzionale (mappe)
+7.  `stringr`: manipolazione stringhe
+8.  `forcats`: manipolazione fattori
+9.  `lubridate`: manipolazione date e intervalli di tempo
+
+Noi vedremo in particolare le prime 6. Ciascuna di queste librerie, se necessario, può essere caricata separatamente, oppure possiamo caricarle tutte come `tidyverse`.
+
+Si noti che il messaggio di conflitto ottenuto al caricamento è atteso e del tutto normale.
+
+# Pipe
+
+Oltre alle 9 librerie sopra elencate, `tidyverse` fornisce l'**operatore *pipe***. Una *pipe* è un *condotto* che passa l'output di una funzione all'input di una seconda funzione. Lo scopo è di rendere il codice più leggibile, evitando funzioni nidificate, e efficiente, evitando eccessive variabili intermedie. Utilizzando una *pipe* si riscrive una generica espressione `f(x, y, ...)` come `x %>% f(y, ...)`. Generalmente la *pipe* è indicata con `%>%`, ma esiste anche la forma alternativa `|>`.
+
+In R standard:
+
+```{r}
+round(mean(rnorm(10)), 2)
+```
+
+Questa espressione è particolarmente scomoda da leggere (la prima operazione è quella più interna) e prona ad errori (troppe parentesi). Questa sequenza di operazioni può essere resa più chiara ricorrendo a variabili intermedie:
+
+```{r}
+v <- rnorm(10, 2)
+v.m <- mean(v)
+round(v.m, 2)
+```
+
+Ma le variabili intermedie sono meno efficienti e possono essere scomode o prone ad errori (riuso di variabili con lo stesso nome).
+
+Con l'operatore *pipe* si evitano questi problemi: le operazioni vengono chiaramente elencate una dopo l'altra in ordine logico, e l'output di ogni funzione diventa **il primo argomento** della funzione successiva:
+
+```{r}
+rnorm(10, 2) %>%  
+  mean %>% 
+  round(2)
+```
+
+
+# Tibble
+
+Le tibble sono versioni evolute dei data frame, compatibili con questi ultimi. Hanno alcuni vantaggi:
+
+1.  sono più facili da creare
+2.  sono più robuste
+3.  sono più facili da visualizzare
+
+Nella creazione di un data frame non è possibile fare riferimento ad un'altra colonna, ma bisogna appoggiarsi a variabili intermedie:
+
+```{r}
+v <- c(1,7,3,10,3,2,2) # variabile intermedia
+data.frame(
+  A = v,
+  B = v^2
+)
+
+# Oppure aggiungere una colonna in un secondo momento:
+df <- data.frame(A=c(1,7,3,10,3,2,2))
+df$B <- df$A^2
+```
+
+Creando una tibble, a differenza che nei data frame, è possibile invece che una colonna faccia direttamente riferimento ad una colonna precedente:
+
+```{r}
+tbl <- tibble(
+  A = 1:10,
+  B = A^2
+)
+```
+
+Mentre un data frame viene sempre stampato per intero (che per data frame molto lunghi può essere un problema), una tibble viene sempre limitata alle prime 10 righe. Se si vogliono più (o meno) righe, bisogna stamparla con la funzione `print` passando l'opzione `n`:
+
+```{r}
+tibble(
+  A=1:100,
+  B=NA
+) %>% print(n=20)
+```
+
+Si osservi che le colonne passate a `tibble` devono avere tutte la stessa lunghezza oppure lunghezza pari a 1. In quest'ultimo caso il singolo valore viene ripetuto (come per `NA` nell'esempio). Nel caso di `data.frame`, invece, è possibile passare vettori più corti, con lunghezza pari a un sottomultiplo della lunghezza delle colonne più lunghe: in questo caso il vettore più corto viene *riciclato*:
+
+```{r}
+data.frame(
+  A=1:6,
+  B=c("uno", "due")
+)
+```
+
+Questo automatismo però è pericoloso (perché l'utente non se ne accorge), ed è quindi stato rimosso da `tibble`.
+
+È sempre possibile convertire una tibble in data frame e viceversa:
+
+```{r}
+tbl %>% 
+  as.data.frame() %>% 
+  tail()
+df %>% tibble() %>% str()
+```
+
+È possibile creare tibble passando i dati per riga invece che per colonna, mediante la funzione `tribble` (*TRansposed tIBBLE*). La prima riga deve contenere i nomi delle colonne preceduti da `~`:
+
+```{r}
+tribble(
+  ~x, ~y, ~z,
+  "a", 1, 10,
+  "b", 5, 8,
+  "c", 3, 12
+)
+```
+
+# Caricamento dati
+
+Esistono le versioni *tidy* delle funzioni per leggere e scrivere file di testo:
+
+- `read_csv()`
+- `read_csv2()`
+- `read_table()`
+- `read_fwf()`
+- `write_csv()`
+- `write_csv2()`
+- `write_table()`
+- `write_fwf()`
+
+Il principale vantaggio di queste funzioni rispetto alle equivalenti con il punto nel nome (es. `read.table`) è che esse restituiscono direttamente una tibble.
+
+Vedere il cheatsheet qui: <https://rstudio.github.io/cheatsheets/data-import.pdf>.
+
+Per un file dati locale:
+
+
+```{r}
+read_table("dati.txt")
+```
+
+È possibile anche caricare file di dati direttamente da Internet conoscendo l'URL.
+
+Il sito <https://paolobosetti.quarto.pub>, nella sezione *Example data*, fornisce alcuni file con dati di esempio che useremo durante il corso. Per semplificarne il download, utilizziamo la funzione `adas.utils::examples_url()` che ritorna l'URL completa a partire dal solo nome del file:
+
+```{r}
+examples_url("cotton.dat")
+```
+
+Provando a caricare il file:
+
+```{r}
+read_table(examples_url("cotton.dat"))
+```
+
+A quanto pare, l'importazione non è andata a buon fine. Scarichiamo il file grezzo per capire come mai:
+
+```{r}
+read_file(examples_url("cotton.dat")) %>%
+  str_trunc(200) %>% # Tronco ai primi 200 caratteri
+  cat()              # Stampo la stringa risultante
+```
+
+Le prime 4 righe in effetti sono commenti che iniziano col carattere `#`, quindi è opportuno specificare il carattere di commento in `read_table`:
+
+```{r}
+data <- read_table(examples_url("cotton.dat"), comment = "#")
+data
+```
+
+
+# Gestione delle tabella dati: `dplyr`
+
+La libreria `dplyr` (parte di Tidyverse) fornisce funzioni utili alla manipolazione di tibbe.
+
+Tidiverse contiene alcune tibble di esempio, utili per impararne l'uso. Tra queste la tibble `starwars`:
+
+```{r}
+starwars
+```
+
+## Filtrare le righe
+
+"Filtrare" significa selezionare solo le righe che rispondono ad alcuni criteri. Ad esempio, solo i personaggi più alti di 180 cm e con capelli castani:
+
+```{r}
+starwars %>% 
+  filter(height > 180, eye_color=="brown")
+```
+
+## Riordinare le righe
+
+Altra operazione comune è riordinare una tabella secondo uno o più criteri:
+
+```{r}
+starwars %>% 
+  filter(height > 180, eye_color=="brown") %>% 
+  arrange(desc(height), mass)
+```
+
+I criteri (che devono essere espressioni logiche, quindi non confindere "=" con "==") vengono passati separati da virgole e vengono applicati in sequenza. In questo esempio, cioè i personaggi vengono *prima* ordinati per statura e poi, a pari statura, per massa.
+
+## Selezione di colonne
+
+Per selezionare solo alcune colonne si usa `select`:
+
+```{r}
+starwars %>% 
+  filter(height > 180, eye_color=="brown") %>% 
+  arrange(desc(height), mass) %>% 
+  select(pianeta_natale=homeworld, name:hair_color & !height) %>% 
+  slice_head(n=5)
+```
+
+Gli argomenti di `select` sono:
+
+-   nomi di colonne
+-   intervalli di colonne (`name:hair_color`)
+-   espressioni logiche (`name:hair_color & !height`)
+-   coppie `nuovo_nome = nome_precedente`
+
+## Modificare una colonna
+
+Con `mutate` è possibile modificare una colonna esistente o creare una nuova colonna sulla base di una o più colonne esistenti, mediante espressioni (vettorializzate!):
+
+```{r}
+starwars %>% 
+  mutate(
+    height = height / 100,
+    BMI = (mass/height^2) %>% round(1)
+  ) %>% 
+  relocate(BMI, .after=height) %>% 
+  arrange(desc(BMI))
+```
+
+Si noti `relocate`, che consente di spostare una colonna prima o dopo un'altra colonna.
+
+## Raggruppamento e sommario
+
+Se vogliamo raggruppare tutte le osservazioni (righe) avente una colonna in comune e applicare una funzione di aggregazione, utilizziamo `group_by` e `summarise`. La prima funzione si limita a preparare la tabella individuando i gruppi, ma non modifica nulla:
+
+```{r}
+starwars %>% 
+  group_by(species, sex)
+```
+
+La seconda funzione crea di fatto i sommari, in questo caso come media dei valori:
+
+```{r}
+starwars %>% 
+  group_by(species, sex) %>%
+  summarise(
+    height = mean(height, na.rm=TRUE),
+    mass = mean(mass, na.rm=T)
+  ) %>% 
+  arrange(desc(height))
+```
+
+Per inciso, si noti che la funzione `mean` specifica `na.rm=T`, cioè di omettere tutti i valori `NA` nel calcolare la media:
+
+```{r}
+mean(c(1, NA, 3), na.rm=T)
+```
+
+## Riorganizzazione
+
+Nel linguaggio dell'analisi dati si dice che si preferiscono dati organizzati in maniera *tidy*, cioè **un'osservazione per riga, un osservando per colonna**. Per capire il significato di questa affermazione, consideriamo un'altra tabella di esempio, `relig_income`. In questo caso, le colonne riportano il conteggio di soggetti parte di un campione statistico, raggruppati per religione (righe) e per classe di retribuzione (colonne). Questa tabella **non è *tidy***, dato che lo stesso osservando (conteggio) è distribuito su più colonne:
+
+```{r}
+relig_income
+```
+
+La tabella può essere resa *tidy* mediante `pivot_longer`:
+
+```{r}
+income <- relig_income %>% 
+  pivot_longer(
+    !religion,            # lavora su tutte le colonne tranne religion
+    names_to = "income",  # i nomi colonna finiscono nella colonna "income"
+    values_to = "count"   # i valori (conteggi) nella colonna "count"
+  )
+income
+```
+
+La trasformazione inversa si ottiene con `pivot_wider`:
+
+```{r}
+income %>% 
+  pivot_wider(
+    names_from = income,
+    values_from = count
+  )
+```
+
+
+## Programmazione funzionale e mappatura di funzioni
+
+Gran parte delle funzioni R opera direttamente su vettori, elemento per elemento, quindi generalmente non c'è bisogno di loop. Per i casi in cui sia necessario operare la stessa trasformazione su tutti gli elementi di un vettore e la trasformazione in questione non è vettorializzata, è possibile utilizzare le [funzioni di `purrr`](https://rstudio.github.io/cheatsheets/purrr.pdf).
+
+In generale esiste una famiglia di funzioni il cui nome comincia con `map_` seguito da un suffisso che indica il tipo del vettore generato (`_int`, `_dbl`, `_chr`, ecc.). Il primo argomento (eventualmente passato via pipe) è il vettire su cui operare, il secondo è una funzione di un solo argomento:
+
+```{r}
+map_dbl(1:3, function(x) {x*2})
+```
+
+La funzione può essere abbreviata, sostituendo `function(x)` con `~`, e `x` con `.`:
+
+```{r}
+1:3 %>%  map_dbl(~ .*2) %>% str()
+```
+
+Come si vede, il suffisso **garantisce** sul tipo di vettore che si ottiene:
+
+```{r}
+1:10 %>% map_int(~ . * 2) %>%  str()
+```
+
+Esiste anche la funzione `map` (senza sufisso), che restituisce sempre una **lista**:
+
+```{r}
+1:10 %>% map(~ .*2) %>% str()
+```
+
+Per fare un esempio d'uso, riprendiamo la tabella `income` (versione *tidy* di `relig_income`). Vogliamo esprimere le quote in percentuale anziché in numero assoluto. Per questo ci servono i totali di individui in ogni categoria.
+
+Calcoliamo la dimensione del campione per ogni religione:
+
+```{r}
+income %>% 
+  group_by(religion) %>% 
+  summarise(total = sum(count))
+```
+
+L'uso in sequenza di `group_by` e `summarise` è così comune che le ultime versioni di `dplyr` consentono una semplificazione:
+
+```{r}
+(totals <- income %>% 
+  summarise(total = sum(count), .by=religion))
+```
+
+Ora possiamo aggiungere una colonna con la percentuale:
+
+```{r}
+income %>% 
+  mutate(
+    total = map_dbl(religion, ~ totals[totals$religion==.,]$total),
+    perc = (count/total*100) %>% round(2)
+  )
+```
+
+Oppure, in un colpo solo e usando la mappa a due valori `map2_dbl()`:
+
+```{r}
+income %>% 
+  mutate(
+    perc = map2_dbl(religion, count, ~ (.y/totals[totals$religion == .x,]$total * 100) %>% round(2))
+  )
+```
+
+Si noti che le mappe a due valori si attendono una funzione che accetta due argimenti, cioè del tipo `\(x,y) x + y` oppure, in forma sintetica `~ .x + .y`.
+
+In realtà, l'operazione sopra eseguita consiste di unire due tabelle secondo una colonna comune, che agisce da cerniera. Questa operazione nel linguaggio dei database si chiama *left join*, e la libreria `dplyr` fornisce proprio una funzione equivalente:
+
+```{r}
+income %>% left_join(totals)
+```
+
+Cioè: importa nella tabella a sinistra tutte le voci corrispondenti nella tabella a destra, associandole mediante la colonna comune `religion`.
+
+Se le due tabelle hanno più di una colonna comune, oppure se il nome della colonna comune sono differenti, allora è necessario usare l'opzione `by` come segue:
+
+```{r}
+# Per dichiarare esplicitamente la colonna cerniera (obbligatorio nel caso di più colonne comuni)
+income %>% left_join(totals, by=join_by(religion))
+```
+
+oppure:
+
+```{r}
+# per dichiarare i nomi delle due colonne da usare come cerniera (si noti il doppio uguale!)
+income %>% 
+  rename(Religion = religion) %>% 
+  left_join(totals, by=join_by(Religion == religion))
+```
+
+Esiste anche il `join_right()`; in generale, comunque, consultare l'help di `join_left()` per comprendere i vari tipi di operazione *join*:
+
+```{r}
+# attenzione: scambio la posizione delle due tabelle
+totals %>% 
+  right_join(income)
+# il risultato è lo stesso ma l'ordine delle colonne è differente
+```
+
+Posso mettere tutto assieme ottenendo il risultato voluto in un'unico blocco di operazioni, sequenziali e chiare:
+
+```{r}
+income %>% 
+  # Aggiungo la colonna con i totali
+  left_join(
+    summarise(., total=sum(count), .by=religion),
+    by = join_by(religion)
+  ) %>% 
+  # Calcolo le percentuali
+  mutate(
+    perc = (count/total*100) %>% round(2) 
+  ) %>% 
+  # Seleziono solo ciò che mi serve
+  select(religion:count, perc)
+```
+
+# Grafici con GGplot2
+
+D'ora in avanti non utilizzeremo più le funzioni di plot base di R, ma ricorreremo piuttosto alla libreria `ggplot2` inclusa in `tidyverse`. È una libreria studiata per realizzare grafici di alta qualità evitando soluzioni che sono considerate fuorvianti o poco chiare.
+
+La libreria è basata sulla funzione `ggplot`, che accetta come primo argomento un data frame o una tibble.
+
+Il secondo argomento è chiamato *mapping* e rappresenta l'*estetica*, cioè definisce il ruolo delle varie colonne della tibble (ascissa, ordinata, colore, gruppo, ecc.). Il *mapping* si crea con la funzione `aes` (che sta per *aesthetics*):
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1, y=v2)) 
+```
+
+Come si nota, `ggplot` da sola non crea nessun grafico, ma le etichette degli assi sono giuste e l'estensione degli assi stessi è sufficiente a contenere tutti i dati nella tibble.
+
+Per aggiungere serie grafiche si usano comandi di *geometria*, che iniziano con il suffisso `geom_`:
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1, y=v2)) +
+  geom_line() +
+  geom_point(color="red", size=4)
+```
+
+Per aggiungere una seconda serie è necessario specificare una differente estetica in una differente geometria. La logica è:
+
+* le estetiche comuni alle varie serie (ad esempio l'ascissa) si mettono in `ggplot`
+* le estetiche proprie di ciascuna serie (le ordinate) si mettono nelle geometrie
+
+Cioè, ogni geometria eredita l'estetica definita in `ggplot()`, che fa da *comun denominatore*, e la può personalizzare con una propria estetica (che è **solo** della geometria corrente): 
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1)) +
+  geom_line(aes(y=v2), color="red") +
+  geom_line(aes(y=v3), color="green") + 
+  labs(x="Tempo (s)", y="Tensione (V)", title="Grafico di esempio")
+```
+
+Per ottenere una legenda, il modo più semplice è specificare il colore (o il tipo di linea) come estetica assegnando un nome descrittivo:
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  ggplot(aes(x=v1)) +
+  geom_line(aes(y=v2, color="v2")) +
+  geom_line(aes(y=v3, color="v3")) + 
+  labs(x="Tempo (s)", y="Tensione (V)", title="Grafico di esempio")
+```
+
+In realtà, se i dati sono in formato *tidy* le serie possono essere definite mediante l'estetica stessa, ottenendo automaticamente anche la legenda:
+
+```{r}
+tibble(
+  v1 = 1:10,
+  v2 = v1 ^ 2,
+  v3 = v2 + 10
+) %>% 
+  pivot_longer(-v1, names_to = "Canale", values_to = "Tensione (V)") %>% 
+  rename(`Tempo (s)` = v1) %>% 
+  ggplot(aes(x=`Tempo (s)`)) + 
+  geom_line(aes(y = `Tensione (V)`, color=Canale, linetype=Canale))
+```
+
+Da notare:
+
+* estetiche come `color` (e `linewidth`, `linestyle`, `fill`, `shape`, ecc.) possono essere specificate
+  - nella funzione `aes`, e fungono da aggregatori di serie
+  - come argomenti di `geom_`, e si applicano a tutti gli oggetti di quella geometria
+* la funzione `labs` consente di specificare le etichette per assi, grafico *e legenda*
+
+
+## Esempio evoluto
+
+Il seguente è un esempio complesso. Non è stato eseguito a lezione e non è obbligatorio. Tuttavia, provare a seguirne la logica è un buon esercizio per imparare a padroneggiare `dplyr` e `ggplot`.
+
+Vogliamo ora realizzare qualche grafico per illustrare i dati di reddito nella tabella `income`. Anzitutto trasformiamo la colonna `income` da stringa in colonna numerica, che si servirà più avanti per poter riordinare i dati: Ci creiamo una tibble di supporto che definisce le corrispondenze numeriche per ogni intervallo di reddito:
+
+```{r}
+(values <- tibble(
+  income = relig_income %>% select(!religion) %>% names(),
+  v = c((1:5)*10, 75, 100, 150, 300, 0)
+))
+```
+
+Con un *left join* importiamo questi valori nella tabella originale:
+
+```{r}
+income2 <- income %>% 
+  left_join(values) %>% 
+  rename(income_n=v) %>% 
+  relocate(income_n, .after=income) %>% 
+  left_join(summarise(., total=sum(count), .by=religion)) %>% 
+  mutate(
+    income = factor(income, ordered=T, levels=values$income),
+    perc = (count/total*100) %>% round(2)
+  )
+
+income2
+```
+
+Si noti che la colonna `income` è stata ridefinita come `factor(income, ordered=T, levels=values$income)`: in questo modo gli intervalli di reddito vengono rappresentati come fattori (cioè variabili categoriche) ordinati (`ordered=T`) secondo la sequenza logica (come in `values$income`).
+
+Possiamo ora realizzare un grafico a barre sovrapposte, filtrando solo le righe per cui `income_n != 0`:
+
+```{r}
+income2 %>% 
+  filter(income_n != 0) %>%
+  ggplot(aes(x=religion, y=perc, fill=income)) +
+  geom_col() +
+  coord_flip() + # Scambia X e Y
+  scale_fill_viridis_d() # Scala colore ad alta visibilità
+```
+
+Il grafico, infine, può essere migliorato ordinando le religioni in funzione di quelle che hanno la categoria dei più ricchi più numerosa. Per ottenere questo risultato cambiamo la sequenza di ordinazione del fattore `religion`:
+
+```{r}
+religion_ord <- income2 %>% 
+  filter(income_n == 300) %>% # considero solo i più ricchi
+  arrange(desc(perc)) %>%     # in ordine decrescente
+  pull(religion) %>%          # estraggo solo la colonna religion
+  factor(ordered = T)         # trasformo in vettore ordinato
+
+religion_ord
+```
+
+Ora trasformo `income2` modificando l'ordine intrinseco del fattore `religion` e rifaccio il grafico:
+
+```{r}
+income2 %>% 
+  mutate(
+    religion = factor(religion, levels=religion_ord, ordered=T)
+  ) %>% 
+  filter(income_n != 0) %>% 
+  ggplot(aes(x=religion, y=perc, fill=income)) +
+  geom_col() +
+  geom_hline(yintercept=100, linetype=2) +
+  coord_flip() +
+  scale_fill_viridis_d() +
+  labs(
+    x="Religione",
+    y="Sul totale (%)",
+    fill="Reddito"
+  )
+```
+
+Esercizio: usando un *left join* tradurre i nomi delle religioni nel grafico.
+
+```{r}
+income_t <- income2 %>% 
+  left_join(
+    tibble(
+      religion = income2 %>% pull(religion) %>% as.factor() %>% levels(),
+      religione = c("Agnostico", "Ateo", "Buddista", "Cattolico", "Non sa/non risponde", "Evangelico", "Hindu",
+                    "Protestante nero", "Testimone di Jehovah", "Ebreo", "Protestante", "Mormone", "Musulmano", "Ortodosso",
+                    "Altro cristiano", "Altra fede", "Altra religione mondiale", "Non affiliato")
+    )
+  )
+
+religione_ord <- income_t %>% 
+  filter(income_n == 300) %>% # considero solo i più ricchi
+  arrange(desc(perc)) %>%     # in ordine decrescente
+  pull(religione) %>%          # estraggo solo la colonna religion
+  factor(ordered = T)         # trasformo in vettore ordinato
+
+religione_ord
+
+
+income_t %>% 
+  mutate(
+    religione = factor(religione, levels=religione_ord, ordered=T)
+  ) %>% 
+  filter(income_n != 0) %>% 
+  ggplot(aes(x=religione, y=perc, fill=income)) +
+  geom_col() +
+  geom_hline(yintercept=100, linetype=2) +
+  coord_flip() +
+  scale_fill_viridis_d() +
+  labs(
+    x="Religione",
+    y="Sul totale (%)",
+    fill="Reddito"
+  )
+```
+
+
+
+# Statistica inferenziale
+
+## Test di Student
+
+Caso più generale: test a due campioni, a due lati: creiamo due campioni `s1`e `s2` a partire dalla distribuzione normale. I due campioni avranno dimensioni differenti e saranno estratti da popolazioni con valori attesi e varianze *leggermente* differenti:
+
+```{r}
+set.seed(321)
+n1 <- 10
+n2 <- 14
+s1 <- rnorm(n1, 10.1, 0.2)
+s2 <- rnorm(n2, 10.2, 0.1)
+
+ggplot() +
+  geom_point(aes(x=1:n1, y=s1, color="s1")) +
+  geom_point(aes(x=1:n2, y=s2, color="s2"))
+```
+Si osserva che le medie dei due campioni non sono uguali e ci si chiede se la differenza osservata sia sufficientemente ampia da giustificare l'inferenza che $\mu_1\neq\mu_2$ (ipotesi alternativa):
+
+```{r}
+mean(s1)
+mean(s2)
+```
+
+Per prima cosa è necessario effettuare un test della varianza:
+
+```{r}
+(vt <- var.test(s1, s2))
+```
+
+Il $p$-value pari a `r vt$p.value %>% round(3)` corrisponde ad una probabilità di errore troppo alta per poter scartare l'ipotesi nulla: di conseguenza, concludiamo che **i due campioni provengono da popolazioni con la medesima varianza**, cioè sono campioni omoschedastici.
+
+A questo punto posso procedere col test di Student, specificando opportunamente l'opzione `var.equal` (con una soglia del 5% sulla probabilità d'errore di tipo I):
+
+```{r}
+(tt <- t.test(s1, s2, var.equal = (vt$p.value > 0.05), conf.level=0.99))
+```
+
+Concludiamo che, con una probabilità d'errore pari a `r tt$p.value %>% round(3)`, i due campioni **non possono provenire dalla stessa popolazione**, cioè che vale $H_1:~\mu1\neq\mu2$.
+
+Il T-test riporta le seguenti informazioni notevoli:
+
+-   la statistica di test $t_0=`r tt$statistic`$
+-   i gradi di libertà $n_1+n_2-2=`r n1+n2-2`$
+-   il *p*-value `r tt$p.value`
+-   i limiti dell'intervallo di confidenza
+
+La coppia di ipotesi effettivamente verificate è:
+
+\begin{align*}
+H_0 &: \mu_1-\mu_2 = \mu_0 \\
+H_1 &: \mu_1-\mu_2 \neq \mu_0
+\end{align*} dove $\mu_0$ è il parametro `mu=0` usato nella funzione `t.test()`.
+
+Come detto sopra, solo un *p*-value piccolo (solitamente almeno minore di 0.05) ci consente di rigettare $H_0$.
+
+L'intervallo di confidenza **è calcolato relativamente a** $\mu_0$: se nella funzione `t.test` il valore del parametro `mu` (con default a `0`) risulta interno all'intervallo, allora si accetta $H_0$ con il livello di confidenza assegnato (`conf.level`, default a 0.95), e viceversa. Ad esempio, si noti che se impongo a $\mu_0$ il valore di uno degli estremi dell'intervallo di confidenza, il *p-value* risulta pari proprio a 1 meno il livello di confidenza $1-0.95=0.05$:
+
+
+```{r}
+t.test(s1, s2, var.equal = vt$p.value > 0.05, mu = -0.00696)
+```
+
+### Sintassi alternativa in formato *formula*
+
+Se i dati sono in un data frame *tidy*, è possibile usare una sintassi alternativa per `t.test()`:
+
+```{r}
+df <- tibble(
+  i = 1:length(s1),
+  s = "s1",
+  value = s1
+) %>% 
+  bind_rows(
+    tibble(
+      i = 1:length(s2),
+      s = "s2",
+      value = s2
+    )
+  )
+
+df
+```
+Si noti che `s1` e `s2` hanno lunghezze diverse.
+
+In questo caso, i test possono essere fatti così:
+
+```{r}
+var.test(value~s, data=df)
+t.test(value~s, data=df, var.equal=T)
+```
+
+La **formula** `value ~ s` significa "*considera i valori in `value` raggruppati per la colonna `s`, prendedno di dati da df (`data=df`)*".
+
+## T-test a un lato
+
+Si noti che se per gli stessi campioni si valuta il corrispondente test a un lato, osservando che $\bar s_1 < \bar s_2$:
+
+```{r}
+t.test(s1, s2, 
+       var.equal=(vt$p.value>=0.05), 
+       mu=0,
+       alternative = "less",
+       conf.level=0.95)
+```
+
+si ottiene un $p$-value minore, cioè si può scartare l'ipotesi nulla con più forza: quando cioè si può già escludere uno dei due lati, il test a un lato è **più potente** (nel senso che ha una maggior potenza).
+
+## Box plot
+
+Dal punto di vista grafico, la differenza tra i due campioni `s1` e `s1` può essere visualizzata con un *box-plot*.
+
+Per crearlo, riorganizziamo i dati in modo da utilizzare una tibble. La funzione `geom_boxplot()` vuole un'estetica in cui in ordinata ci siano i valori e in ascissa una variabile categorica da utilizzare come chiave di raggruppamento:
+
+```{r}
+df <- tibble(
+  i = c(1:10, 1:14),
+  sample = c(rep("s1", 10), rep("s2", 14)),
+  values = c(s1, s2)
+)
+
+df %>% 
+  ggplot(aes(x=sample, y=values)) + 
+  geom_boxplot(varwidth=TRUE)
+```
+
+La tibble rende anche più semplice realizzare il grafico a dispersione:
+
+```{r}
+df %>% 
+  ggplot(aes(x=i, y=values, color=sample)) +
+  geom_point()
+```
+
+
+## Anomalie
+
+### Criterio di Chauvenet
+
+Il criterio di Chauvenet non è disponibile in R, ma è facile costruire una funzione che lo implementi:
+
+```{r}
+# Utilizziamo la libreria glue (da installare preventivamente)
+# glue serve per costruire stringhe che uniscono testo e valori
+library(glue)
+
+# La funzione accetta un vettore x e una soglia di accettazione
+chauvenet <- function(x, threshold=0.5) {
+  abs.diff <- abs(x - mean(x)) / sd(x) # vettore differenze
+  s0 <- max(abs.diff)                  # massima differenza
+  i0 <- which.max(abs.diff)            # indice con massima differenza
+  Ps <- pnorm(s0, lower.tail = F)      # prob di un valore superiore a s0
+  freq <- length(x) * Ps               # frequenza attesa
+  # Il rsultato è una lista di valori
+  result <- list(
+    s0 = s0,
+    index = i0,
+    value = x[i0],
+    freq = freq,
+    reject = freq < threshold
+  )
+  # Stampo un'analisi del risultato
+  glue("Suspect outlier: {i0}, value {x[i0]}") %>% print()
+  glue("Expected frequency: {freq}, threshold: {threshold}") %>% print()
+  glue("Decision: {ifelse(result$reject, 'reject it', 'keep it')}") %>% print()
+  # restituisco la lista di valori in maniera invisibile
+  invisible(result)
+}
+
+s1.ch <- chauvenet(s1)
+```
+
+La variabile `s1.ch` è una lista che contiene tutti i valori calcolati:
+
+```{r}
+s1.ch
+```
+
+**NOTA**: la funzione `chauvenet()` è anche disponibile nel pacchetto `adas.utils`.
+
+
+
+### Test di Grubb:
+
+Nella realtà, piuttosto che applicare il test di Chauvenet si preferisce ricorrere al test di Grubb (fornito dalla funzione `grubbs.test()` del pacchetto `outliers`):
+
+```{r}
+grubbs.test(s1)
+```
+
+la quale conferma che il punto massimo di `s1` è un'anomalia. Dato che però il test di Grubb non fornisce *l'indice* dell'elemento anomalo, è necessario ricavarlo manualmente come indice dell'elemento col massimo scarto rispetto alla media del campione:
+
+```{r}
+which.max(abs(s1 - mean(s1)))
+```
+
+Per il secondo campione invece non risultano anomalie:
+
+```{r}
+grubbs.test(s2)
+```
+
+Possiamo quindi rimuovere il punto anomalo:
+
+```{r}
+df %>% 
+  filter(!(sample=="s1" & i==1)) %>%
+  ggplot(aes(x=sample, y=values)) + 
+  geom_boxplot(varwidth=T)
+```
+
+## Esercizi
+
+### Anomalie -- 1
+
+Dopo aver eliminato dai campioni `s1` e `s2` gli eventuali punti anomali mediante test di Grubb, verificare con un test di Student se i valori attesi dei due campioni siano uguali o meno.
+
+```{r}
+grubbs.test(s1)
+grubbs.test(s2)
+```
+
+Spesso, piuttosto che rimuovere il punto anomalo, è meglio impostarlo a `NA`: in questo modo rimane traccia che si è persa un'osservazione.
+
+```{r}
+s1[which.max(s1)] <- NA
+```
+
+È poi però necessario **gestire** i valori `NA`. Alcune funzioni (come `mean()` e `sd()`) hanno l'opzione `na.omit`. Altre (come i vari test di inferenza) no. In questi casi si può usare `na.omit()`, che rimuove da un vettore tutti gli `NA`:
+
+```{r}
+var.test(na.omit(s1), s2)
+t.test(na.omit(s1), s2, var.equal=T)
+```
+
+
+
+### Anomalie -- 2
+
+Generare un campione di 35 dati normali con media 38.7 e deviazione standard 3.15. Modificare il quindicesimo punto assegnandogli il valore `m+3.0*sd`.
+
+Commentare il risultato applicando sia il test di Chauvenet, sia il test di Grubb.
+
+```{r}
+v <- rnorm(35, 38.7, 3.15)
+v[15] <- mean(v) + 3 * sd(v)
+chauvenet(v)
+grubbs.test(v)
+```
+Secondo Chauvenet il punto va rigettato, secondo Grubbs il p-value è del 11% (un po' alto). Si noti che il punto aggiunto sta a tre deviazioni standard dalla media: nella distribuzione normale l'intervallo $\pm 3\sigma$ contiene il 99.7% delle osservazioni.
+
+
+### Test di Student a un campione
+
+Considerare i seguenti dati:
+
+```{r message=FALSE}
+read_table(examples_url("diet.dat")) %>% head(n=10)
+```
+
+verificare l'ipotesi che i valori della colonna `cTime` quando `diet` è uguale a `D` provengano da una popolazione con media $\mu_0=59$
+
+```{r message=FALSE}
+read_table(examples_url("diet.dat")) %>% 
+  filter(diet=="D") %>% 
+  pull(cTime) %>% 
+  t.test(mu=59)
+```
+
+
+### Test di Student accoppiato
+
+Considerare i seguenti dati: essi rappresentano delle misure di durezza effettuate con due diversi strumenti (indentatori `Tip1` e `Tip2`). Si ha il sospetto che uno dei due strumenti non sia correttamente calibrato e si vuole verificare l'ipotesi che le 10 misure ottenute col primo strumento abbiano lo stesso valore atteso di quelle ottenute col secondo. Inoltre, non disponendo di materiale su cui verificare la durezza sufficientemente grande per realizzare tutte e venti le impronte, si effettuano due a due le misure di durezza su piccoli campioni (`specimen`), considerati internamente omogenei ma non necessariamente tutti uguali:
+
+```{r message=FALSE}
+read_table(examples_url("hardness2.dat"))
+```
+
+Che conclusioni possiamo trarre? rifiutiamo $H_0:~\mu_1=\mu_2$? se sì, con che probabilità d'errore? Cosa cambia con i differenti tipi di test di Student? Cosa possiamo dire sulla loro potenza?
+
+
+```{r message=FALSE}
+df <- examples_url("hardness2.dat") %>% read_table()
+
+t.test(df$Tip1, df$Tip2, paired=T)
+t.test(df$Tip1, df$Tip2, var.equal=T)
+```
+
+Quindi il T-test accoppiato conferma che i due strumenti producono misure differenti, mentre il T-test convenzionale non riesce a distinguerli, perché le differenze sono mascherate dalla variabilità della durezza intrinseca dei campioni metallici. 
+
+In grafico possiamo visualizzare le singole misure:
+
+```{r}
+df %>% 
+  pivot_longer(-Specimen, names_to="Tip", values_to="Hardness") %>% 
+  ggplot(aes(x=Specimen, y=Hardness, color=Tip)) + 
+  geom_point()
+```
+Il box-plot produce due box abbastanza allineati; come per il T-test convenzionale, quindi, non è sufficiente a evidenziare il problema. **Solo il test accoppiato fornisce la risposta corretta**.
+
+```{r}
+df %>% 
+  pivot_longer(-Specimen, names_to="Tip", values_to="Hardness") %>% 
+  ggplot() + 
+  geom_boxplot(aes(x=Tip, y=Hardness))
+```
+
+
+### Box plot
+
+Consideriamo i dati nel file esempio `diet.dat`:
+
+```{r message=FALSE}
+# Imposto kable in modo che stampi una lineetta al posto di NA
+options(knitr.kable.NA = "--")
+
+#Stampo la tabella in forma compatta ("wide")
+read_table(examples_url("diet.dat")) %>% 
+  group_by(diet) %>%                          # Raggruppo per dieta
+  mutate(ripetizione=1:n()) %>%               # Aggiungo colonna con l'ID del singolo test,
+                                              # gruppo per gruppo
+  select(cTime, diet, ripetizione) %>%        # Seleziono solo le colonne che servono
+  pivot_wider(                                # rendo la tabella "larga"
+    names_from = diet,                        # - nomi delle colonne
+    names_prefix = "dieta ",                  # - prefisso per i nomi
+    values_from = cTime                       # - valori nelle celle
+  ) %>% 
+  knitr::kable(                               # formatto la tabella per output LaTeX
+    caption="Tempo di coagulazione (min)"     # - specifica legenda della tabella
+  )
+```
+
+**Nota**: Il blocco soprastante mostra come rendere in forma compatta e ben formattata una tabella sul report \LaTeX: compilare il documento per vedere il risultato. Provare a disattivare i vari passi per comprenderne lo scopo e l'effetto[^1].
+
+Discutere quanto segue:
+
+1. realizzare un box-plot in cui le categorie siano rappresentate dalla colonna `diet` e la variabile in studio dalla colonna `cTime`.
+2. Studiando l'help in linea della funzione `geom_boxplot`, verificare l'uso dell'opzione `notch` e discutere il grafico risultante.
+
+[^1]: Si noti la sintassi `knitr::kable()`, equivalente a caricare la libreria `library(knitr)` e poi usare la funzione `kable()`: quando si usa una sola funzione di una libreria, anziché caricarla completamente è possibile limitarsi a specificarne il nome prima della funzione, seguito da `::`.
+
+
+```{r message=FALSE}
+examples_url("diet.dat") %>% 
+  read_table() %>% 
+  ggplot(aes(x=diet, y=cTime)) +
+  geom_boxplot(notch=TRUE)
+```
+
+Intagli (*notch*) sovrapposti significa che i relativi gruppi sono significativamente differenti. In questo caso, ad esempio, i gruppi A e D non sono differenti, invece A e B sì.
+
+**NOTA**: questa è solo una tecnica visuale rapida. In migliore confronto tra più campioni si fa con il **test di Tukey**.
+
+
+# Verifica di normalità
+
+Ricordiamoci che i test di inferenza su due campioni sono sempre basati sull'**ipotesi che i campioni siano normali e indipendenti** cioè non-correlati. È quindi sempre **necessario** verificare queste ipotesi con opportuni test.
+
+## Correlazione
+
+Creiamo tre campioni, due dei quali siano **indipendenti**, e due invece siano correlati:
+
+```{r}
+set.seed(0)
+N <- 50
+
+df <- tibble(
+  s1 = rnorm(N, 3, 1),
+  s2 = rnorm(N, 5, 1),
+  s3 = 2 + 1.5*s1 + rnorm(N, 0, 0.5)
+)
+```
+
+Ovviamente `df$s1` e `df$s2` sono indipendenti, mentre `df$s1` e `df$s3` sono correlati.
+
+Valutiamo le covarianze e correlazioni:
+
+```{r}
+cov(df$s1, df$s2)
+cov(df$s1, df$s3)
+cor(df$s1, df$s2)
+cor(df$s1, df$s3)
+```
+
+Come detto a lezione, è molto più indicativa la correlazione, in quanto sempre limitata tra -1 e 1. In questo caso, la correlazione tra il primo e il terzo campione, come ci si attende, è vicina a 1, mantre quella tra il primo e il secondo è più vicina a 0.
+
+La situazione può anche essere valutata con un grafico:
+
+```{r}
+df %>% 
+  ggplot(aes(x=s1)) + 
+  geom_point(aes(y=s2, color="s2")) + 
+  geom_point(aes(y=s3, color="s3"))
+```
+
+Tuttavia per **decidere** se ci sia o meno correlazione è più utile un test di inferenza. In R c'è il test di correlazione di Pearson, per il quale l'ipotesi nulla è che i due campioni **non siano correlati**:
+
+```{r}
+cor.test(df$s1, df$s2)
+cor.test(df$s1, df$s3)
+```
+
+
+
+## Normalità
+
+Generiamo una tabella con due serie di dati, una tratta da una distribuzione normale, l'altra da una distribuzione uniforme. Si noti che trasformiamo la tabella in modo da avere una rappresentazione *tidy* dei dati:
+
+```{r}
+set.seed(10)
+N <- 200
+
+df <- tibble(
+  i = 1:N,
+  sn = rnorm(N, 10, 2),
+  su = runif(N, 8, 12)
+) %>% 
+  pivot_longer(-i, names_to = "campione", values_to = "valore")
+
+
+df %>% 
+  ggplot(aes(x=i, y=valore, color=campione)) + 
+  geom_point()
+```
+
+### Metodi grafici
+
+Una prima analisi grafica è il diagramma quantile-quantile:
+
+```{r}
+df %>% 
+  ggplot(aes(sample=valore, color=campione)) +
+  geom_qq() +
+  geom_qq_line()
+```
+
+I punti del campione `sn` sono meglio allineati alla diagonale. Per esercizio, provate a cambiare la dimensione del campione (ad esempio `N <- 2000`) e verificate come la differenza tra i due Q-Q plot diventi sempre più evidente.
+
+Anche un istogramma può aiutare. In questo caso costruiamo due istogrammi per i due campioni, confrontandoli con una curva PDF normale per la quale ci calcoliamo le medie e le deviazioni standard:
+
+```{r}
+(stats <- df %>% 
+  summarise(m=mean(valore), sd=sd(valore), .by=campione))
+```
+
+Ora usiamo `geom_histogram()` sul campione normale: 
+
+```{r}
+df %>% 
+  filter(campione=="sn") %>% # seleziono solo il campione normale
+  ggplot() +
+  geom_histogram(
+    aes(x=valore, y=after_stat(density)), 
+    bins=nclass.Sturges, # uso la funzione di Sturges per calcolare il numero di colonne
+    color=grey(0.2)
+  ) + 
+  geom_function(fun=~dnorm(., stats$m[1], stats$sd[1])) # aggiungo la PDF
+```
+
+**NOTA**: l'estetica usa `y=after_stat(density)`: se non si specifica l'estetica `y`, il default è di riportare l'istogramma dei **conteggi**, cioè l'altezza (`y`) di ogni canna è il numero di valori riscontrati nel relativo intervallo. Per il confronto con la PDF, però, è necessario che l'altezza delle canne riporti la **densità** (conteggio / larghezza canna). A questo serve `y=after_stat(density)`: significa "*usa come ordinata la densità, ottenuta dopo aver calcolato le statistiche necessarie per realizzare il grafico*". 
+
+Ripetendo per il campione uniforme è molto più evidente il disaccordo tra PDF normale e istogramma del campione:
+
+```{r}
+df %>% 
+  filter(campione=="su") %>% 
+  ggplot() +
+  geom_histogram(
+    aes(x=valore, y=after_stat(density)), 
+    bins=nclass.Sturges,
+    color=grey(0.2)
+  ) + 
+  geom_function(fun=~dnorm(., stats$m[2], stats$sd[2]))
+```
+
+
+
+### Test di Shapiro-Wilk
+
+I test grafici sono di solito più efficaci su campioni molto grandi (migliaia di valori). Su campioni più piccoli è meglio effettuare test di inferenza, come il **test di normalità Shapiro-Wilk**, per il quale l'ipotesi nulla è che il campione provenga da una distribuzione normale:
+
+```{r}
+# la funzione vuole solo un vettore di punti
+# posso ottenerlo da df mediante dplyr:
+shapiro.test(df %>% filter(campione=="sn") %>% pull(valore))
+# oppure mediante R-base (più breve ma meno chiaro)
+shapiro.test(df$valore[df$campione=="su"])
+```
+
+Come detto a lezione, il test di Shapiro è molto potente, per cui bastano anche pochi punti per abbassare il *p-value*.
+
+## Esercizio
+
+Implementare il test del Chi-quadro per la normalità, come visto a lezione.
+
+Costruiamo il test secondo [la teoria](https://paolobosetti.quarto.pub/slides/ADAS/1-statistica.html#/analisi-di-normalit%C3%A0-test-del-chi-quadro). Nota l'uso delle funzioni `qnorm()`, `cut()` e `tabulate()`:
+
+```{r}
+sample <- df %>% filter(campione=="su") %>% pull(valore)
+
+k <- floor(N/5)   # numero di bins, in media 5 campioni per bin
+m <- mean(sample)
+s <- sd(sample)
+
+# calcolo i breaks, cioè gli estremi dei k bins (cioè k+1 valori) tali che
+# ogni bin abbia la probabilità di avere N/k osservazioni. Significa
+# valutare la funzione quantile sui k+1 estremi per la normale con media 
+# e deviazione standard del campione:
+b <- qnorm(seq(0, 1, length.out=k+1), m, s)
+
+# valuto quanti valori del campione osservato rientrano in ciascun bin
+# per capire questa espressione eseguirla un passo alla volta:
+O <- sample %>% cut(breaks=b) %>% tabulate()
+
+# I valori attesi sono N/k, cioè 5 (per costruzione)
+E <- N/k
+
+# Calcolo la statistica di test
+X0 <- sum((O-E)^2/E)
+
+# Calcolo la probabilità di un valore pari o superiore a X0
+# Attenzione ai gradi di libertà (vedi teoria)
+pchisq(X0, k-2-1, lower.tail = F)
+```
+
+
+# Analisi della varianza
+
+Consideriamo il file d'esempio `cotton.dat`, che riporta i risultati di prove di resistenza a trazione di filati misti cotone/sintetico in funzione della percentuale di fibre di cotone:
+
+```{r}
+df <- examples_url("cotton.dat") %>% 
+  read_table(comment = "#") %>% 
+  mutate(Cotton = factor(Cotton))
+
+df %>% 
+  ggplot(aes(x=Cotton, y=Strength)) + 
+  geom_boxplot() + 
+  labs(x="Contenuto in cotone (%)", y="Resistenza a trazione (N)")
+```
+
+Quali delle differenze osservate sono statisticamente significative?
+
+Cominciamo con il formulare un **modello statistico** per i dati. Il **modello delle medie** è:
+
+$$
+y_{ij} = \mu_i + \varepsilon_{ij},~~~\varepsilon_{ij}\sim\mathcal N(0, \sigma^2)
+$$
+ed esprime ogni osservazione $y_{ij}$ come una componente deterministica $\mu_i$ propria di ciascun **gruppo di osservazioni** corrispondente ad un dato trattamento, più una componente stocastica $\varepsilon_{ij}$ (il **residio**).
+
+In alternativa, il **modello degli effetti** è completamente equivalente:
+
+$$
+y_{ij} = \mu_0 + \tau_i + \varepsilon_{ij},~~~\varepsilon_{ij}\sim\mathcal N(0, \sigma^2)
+$$
+
+in cui $\mu_0$ è la media complessiva di tutte le osservazioni e le $\tau_i$ sono le differenze delle medie di trattamento rispetto a $\mu_0$.
+
+Per il **modello delle medie** la coppia di ipotesi è:
+
+$$
+\begin{align}
+H_0&: \mu_1 = \mu_2 = \dots = \mu_n \\
+H_1&: \mu_i \neq \mu_j~~~\textrm{per almeno una coppia } i\neq j
+\end{align}
+$$
+
+mentre per  il **modello degli effetti**:
+
+
+$$
+\begin{align}
+H_0&: \tau_1 = \tau_2 = \dots = \tau_n = 0 \\
+H_1&: \tau_i \neq 0~~~\textrm{per almeno una } i
+\end{align}
+$$
+
+Ancora: le due coppie di ipotesi sono assolutamente equivalenti.
+
+In R, il **modello statistico** è espresso come un modello lineare nei coefficienti mediante la funzione `lm()`. Quest'ultima accetta come parametro una *formula*, cioè una speciale sintassi di R che rappresenta delle relazioni tra ingressi ed uscite di un generico modello. per trasformare un modello statistico in formula R si procede come segue:
+
+* si considera il modello degli effetti
+* si rimuovono $\mu_0$ e i residui (e eventuali coefficienti)
+* nella relazione restante si sostituisce `=` con `~`
+
+Nel nostro caso, considerando che la $y_{ij}$ è rappresentata dalla colonna `Strength` e la colonna tratamento $\tau_i$ è rappresentata dalla colonna `Cotton`, risulta:
+
+```{r}
+df.lm <- lm(Strength ~ Cotton, data=df)
+```
+
+Questo oggetto *modello lineare* può essere passato alla funzione `anova()`:
+
+```{r}
+anova(df.lm)
+```
+
+Il risultato mostra u *p-value* molto piccolo, il che ci spinge a rifiutare l'ipotesi nulla e concludere che **almeno un trattamento $\tau_i$ ha un effetto statisticamente significativo**.
+
+**ESERCIZIO**: provare a rimuovere la conversione in fattore della colonna `Cotton` subito dopo il caricamento della tabella. Si osserva che la tabella ANOVA risultante è differente, e che la conclusione è opposta (*p-value* alto). Si osserva anche che in tal caso il numero di gradi di libertà nella seconda colonna per la riga `Cotton` è 1 invece di 4. Il motivo è che la colonna in questione contiene sì dati numerici, ma essi vanno intesi come **categorici**, cioè come indicatori di raggruppamento dei trattamenti, e ciò in R si ottiene con la trasformazione in fattori. Se così non è, le osservazioni non vengono raggruppate e i gradi di libertà sono calcolati in modo errato.
+
+
+Ogni test visto fin ora, inclusa ANOVA, è basata su una ipotesi di normalità dei residui, che sono disponibili nel modello lineare come `df.lm$residuals` oppure come `residuals(df.lm)`. Questa ipotesi va **verificata**, ad esempio con il test di Shapiro, la cui ipotesi nulla è quella di normalità:
+
+```{r}
+df.lm$residuals %>% shapiro.test()
+```
+
+Esiste anche una seconda funzione utilizzata per il calcolo dell'analisi della varianza, ed è `aov()`. tale funzione richiede una formula (e non un modello lineare), e deve essere a sua volta passata a `summary()` per ottenere la tabella ANOVA:
+
+```{r}
+aov(Strength ~ Cotton, data=df) %>% summary()
+```
+
+**ESERCIZIO**: verificare la normalità dei residui con un grafico Q-Q e con un istogramma.
+
+## Test di Tukey
+
+La funzione `aov()` è anche utile per il calcolo del **test di Tukey**
+
+```{r}
+df.tuk <- aov(Strength ~ Cotton, data=df) %>% TukeyHSD(conf.level=0.99)
+df.tuk
+```
+
+**ESERCIZIO**: provare a cambiare il livello di confidenza e studiarne l'effetto sul *p-value* e sull'intervallo di confidenza per ciascuna differenza.
+
+Il test di Tukey può essere messo in grafico con la funzione `adas.utils::ggTukey()`:
+
+```{r}
+df.tuk %>% ggTukey()
+```
+
+Se non serve la tabella numerica con gli intervalli di confidenza si può ottenere direttamente il grafico:
+
+```{r}
+df %>% ggTukey(Strength ~ Cotton)
+```
+
+
+## Anova a due vie
+
+Consideriamo un esperimento che misura la vita di una batteria al variare della temperatura di esercizio e del tipo di elettrolita utilizzato all'interno della batteria stessa:
+
+```{r}
+df <- examples_url("battery.dat") %>% 
+  read_table() %>% 
+  mutate(
+    Temperature = factor(Temperature),
+    Material = factor(LETTERS[Material])
+  )
+```
+
+Si noti che abbiamo propriamente convertito in fattore le due colonne `Temperature` e `Material`. Inoltre, dato che quest'ultimo è un **fattore qualitativo** lo trasformiamo in lettere, in modo da rimuovere esplicitamente ogni criterio di cardinalità.
+
+Osserviamo i dati in grafico, mettendo in ascissa l'unico fattore quantitativo e in serie quello qualitativo:
+
+```{r}
+df %>% 
+  group_by(Temperature, Material) %>% 
+  summarise(
+    Life = mean(Response),
+    Min = min(Response),
+    Max = max(Response)
+  ) %>% 
+  ggplot(aes(x=Temperature, y=Life, color=Material, group=Material)) + 
+  geom_line() + 
+  geom_point() +
+  geom_errorbar(aes(min=Min, max=Max), width=0.1, position="dodge")
+```
+
+Oppure, in box plot:
+
+```{r}
+df %>% 
+  ggplot(aes(x=Temperature, y=Response, color=Material)) + 
+  geom_boxplot()
+```
+
+Costruiamo il modello lineare **a due fattori** $y_{ijk} = \mu + \alpha_i + \beta_j + (\alpha\beta)_{ij} + \varepsilon_{ijk}$, in cui:
+
+* $\alpha_i$ è l'**effetto** del primo fattore
+* $\beta_j$ è l'**effetto** del secondo fattore
+* $(\alpha\beta)_{ij}$ è l'**interazione** tra i due fattori, cioè indica quanto l'effetto dell'uno dipende dal **livello** dell'altro
+
+Questo modello può essere trasformato in formula R come `Response ~ Temperature + Material + Temperature:Material`, dove i due punti indicano l'interazione. In breve, si può anche scrivere `Response ~ Temperature*Material`, dove l'asterisco si espande in somma più interazione:
+
+```{r}
+# df.lm <- lm(Response ~ Temperature + Material + Temperature:Material, data=df)
+df.lm <- lm(Response ~ Temperature * Material, data=df)
+anova(df.lm)
+```
+
+Si capisce che entrambi i fattori sono statisticamente significativi, e così pure la loro interazione, seppur in misura inferiore.
+
+Quindi, l'analisi della varianza ci conferma che non tutti i trattamenti sono equivalenti. Ma quali differenze sono statisticamente significative? possiamo valutarlo con un (anzi: tre) test di Tukey.
+
+In particolare vogliamo realizzare tre test di Tukey, per i tre tipi di materiale. La funzione `ggTukey()` consente di farlo passando due formule: una per il test vero e proprio, una seconda (parametro `splt`) come formula a un lato per indicare il fattore di raggruppamento:
+
+```{r}
+df %>% 
+  ggTukey(Response ~ Temperature, splt= ~ Material)
+```
+
