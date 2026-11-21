@@ -7,7 +7,7 @@ format:
     toc: true
     number-sections: true
     papersize: "a5"
-    fontsize: "8pt"
+    fontsize: "10pt"
     geometry:
       - margin=5mm
     include-in-header:
