@@ -16,14 +16,14 @@ format:
         \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
 fig-width: 6
 fig-height: 2
+execute: 
+  cache: true
 ---
 
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(adas.utils)
-library(patchwork)
 library(PearsonDS)
-knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Taratura statica di un dinamometro a mensola
@@ -85,16 +85,18 @@ temp <- function(time, t0=4, T0=20, dT=5, tau=2) {
 Verifichiamo con i grafici:
 
 ```{r}
-(ggplot() + 
+ggplot() + 
   geom_function(fun = temp, xlim=c(0,20)) +
-  labs(x="Time (h)", y="Temperature (°C)")) +
-(ggplot() +
-  geom_function(fun = \(f) model(f, 20, parameters), xlim=c(0, 20), color="blue") + 
-  geom_function(fun = \(f) model(f, 25, parameters), xlim=c(0, 20), color="red") + 
-  labs(x="Force (N)", y="Voltage (V)"))
+  labs(x="Time (h)", y="Temperature (°C)")
 ```
 
-Si noti che abbiamo usato la libreria `patchwork`: essa consente di organizzare due o più grafici in matrice: l'operatore `+` affianca due grafici, `/` li sovrappone. È possibile combinarli: ad es. `(p1 + p2)/p3` presenta due grafici affiancati sopra un terzo a doppia larghezza.
+```{r}
+ggplot() +
+  geom_function(fun = \(f) model(f, 20, parameters), xlim=c(0, 20), color="blue") + 
+  geom_function(fun = \(f) model(f, 25, parameters), xlim=c(0, 20), color="red") + 
+  labs(x="Force (N)", y="Voltage (V)")
+```
+
 
 Ora possiamo crearci i dati che simulano l'esperimento:
 
@@ -139,26 +141,26 @@ data <- data %>%
   add_predictions(data.lm) %>% 
   add_residuals(data.lm)
 
-(data %>% 
+data %>% 
   ggplot(aes(x=Force)) + 
   geom_point(aes(y=V)) + 
-  geom_line(aes(y=pred), color="red")) + 
-(data %>% 
+  geom_line(aes(y=pred), color="red")
+data %>% 
   ggplot(aes(x=Force, y=resid)) + 
-  geom_point())
+  geom_point()
 ```
 
 È evidente un pattern a V dei residui, che denuncia l'inadeguatezza (sotto-adattamento) del modello nel regredire i dati. L'operatore passa quindi a un modello di secondo grado:
 
 ```{r}
-data.lm <- lm(V ~ poly(Force, 2, raw=T), data=data)
+data.lm <- lm(V ~ poly(Force, 2), data=data)
 summary(data.lm)
 ```
 
 Dato che il termine di primo grado risulta non significativo, rivede ulteriormente il modello rimuovendolo:
 
 ```{r}
-data.lm <- lm(V ~ I(Force^2), data=data)
+data.lm <- lm(V ~ poly(Force, 2, raw=T), data=data)
 summary(data.lm)
 ```
 
@@ -169,13 +171,14 @@ data <- data %>%
   add_predictions(data.lm) %>% 
   add_residuals(data.lm)
 
-(data %>% 
+data %>% 
   ggplot(aes(x=Force)) + 
   geom_point(aes(y=V)) + 
-  geom_line(aes(y=pred), color="red")) + 
-(data %>% 
+  geom_line(aes(y=pred), color="red")
+
+data %>% 
   ggplot(aes(x=Force, y=resid)) + 
-  geom_point())
+  geom_point()
 ```
 
 Si noti che il lieve pattern a "M" ancora presente potrebbe essere eliminato aumentando ancora il grado della regressione, aumentandolo fino a rimuovere qualsiasi sotto-adattamento.
@@ -282,7 +285,7 @@ Cioè: l'ordine di esecuzione casuale consente di evidenziare eventuali effetti 
 # Metodo Monte Carlo
 
 ```{r}
-N <- 10000
+N <- 1e4
 p <- tibble(
   x = runif(N),
   y = runif(N),
@@ -294,6 +297,51 @@ p %>%
   geom_point() +
   coord_equal()
 ```
+
+
+$$
+\frac{A_c}{A_s} = \frac{\pi/3}{1} \approxeq \frac{\text{punti dentro il cerchio}}{\text{punti totali}}
+$$
+
+```{r}
+p %>% 
+  summarise(
+    pi = 4 * sum(inside)/n()
+  )
+```
+
+```{r}
+# Set precision (number of digits)
+options(digits = 10)
+
+approxpi <- function(N) {
+  tibble(
+    x = runif(N),
+    y = runif(N),
+    inside = sqrt(x^2 + y^2) < 1
+  ) %>% 
+    summarise(
+      pi = 4 * sum(inside)/n()
+    ) %>% 
+      pull(pi)
+}
+
+tibble(
+  N = 10^(1:6),
+  pi = map_dbl(N, approxpi)
+) %>% 
+  ggplot(aes(x=N, y=pi)) + 
+  geom_point() + 
+  geom_hline(yintercept = pi, color="red", linetype=2) +
+  scale_x_log10() +
+  labs(x="Number of points", y="Approximation of pi")
+```
+
+
+
+
+## Volume cilindro
+
 ```{r}
 set.seed(0)
 N <- 10000
